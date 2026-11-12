@@ -1,31 +1,51 @@
 ---
 layout: post
-title: "RL-Ready Kernels in FlashInfer: Fixed Numerics, Flexible Execution"
+title: "FlashInfer for RL: Minimizing the Performance Cost of Batch Invariance"
 date: 2026-11-11 00:00:00 +0000
 author: "Brian K. Ryu"
 body_class: technical-blog
 toc: true
-excerpt: "FlashInfer fixes the numerical dataflow, verifies its reduction semantics in Lean, and optimizes its execution for reinforcement-learning workloads."
+excerpt: "Minimizing the performance cost of batch-invariant GEMMs for RL through fixed numerical dataflow, Lean verification, and flexible GPU execution."
 ---
 
 <!-- Review draft. Results come from the complete, audited Vera Rubin NVL4
      study. Copy this post and its referenced assets together for publication. -->
 
-Reinforcement learning asks a model to evaluate the same tokens in different ways. A rollout engine generates responses a few tokens at a time. A trainer later processes those responses in larger batches to compute log probabilities and updates. Both may use the same weights, yet produce different numbers.
+Reinforcement learning repeatedly evaluates the same policy under different execution conditions. A rollout engine generates responses a few tokens at a time, mixing requests as they arrive and finish. A trainer later processes those responses in larger batches to recompute log probabilities and form updates. For identical weights and token histories, we want both sides to assign the same probabilities. Optimized implementations can still produce different numbers.
 
-One source of that mismatch is below the model: GPU kernels change their arithmetic as the batch changes. A matrix multiplication that uses one reduction at decode may use another at prefill. Floating-point addition is not associative, so changing the order of accumulation can change the output bits. A fixed random seed does not fix a changing reduction order.
+One source of that mismatch is below the model: GPU kernels adapt their arithmetic to the workload. A matrix multiplication can use one reduction at decode and another at prefill. Floating-point addition is not associative, so those choices can change output bits. A fixed random seed does not fix a changing reduction order. [Thinking Machines Lab](https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/) explains how changing serving batches makes this visible even when each kernel repeats deterministically for a fixed shape.
 
-FlashInfer's approach starts with a numerical contract: **fix the numerical dataflow, then optimize how the GPU executes it.** The dataflow determines each output's bits. The implementation can change tile shapes, work assignment, and scheduling while preserving that dataflow. Lean proofs establish identities about the numerical model, and bitwise GPU tests check that the generated implementations agree.
+For RL, the discrepancy reaches the quantities used to update the policy. There is also a performance constraint: rollout throughput matters, and slower consistent kernels can make each training iteration more expensive. The practical target is to preserve numerical behavior while minimizing that performance loss.
 
-FlashInfer [v0.7.4](https://github.com/flashinfer-ai/flashinfer/releases/tag/v0.7.4) introduced this mode for BF16, FP8, MXFP8, NVFP4, and MXFP4 GEMMs on Blackwell and Rubin. This post explains the contract, how it leaves room for performance optimization, and how we evaluate it on **NVIDIA Vera Rubin NVL4**.
+FlashInfer's approach starts with a numerical contract: **fix the numerical dataflow, then optimize how the GPU executes it.** Lean proofs establish identities about that dataflow, and bitwise GPU tests check that implementations preserve it as tiling, work assignment, and scheduling change. FlashInfer [v0.7.4](https://github.com/flashinfer-ai/flashinfer/releases/tag/v0.7.4) introduced this mode for BF16, FP8, MXFP8, NVFP4, and MXFP4 GEMMs on Blackwell and Rubin. This post explains how tuning and controlled split-K fit within the contract, then measures the cost of invariance across decode, middle, and prefill on **NVIDIA Vera Rubin NVL4**, comparing regular and batch-invariant kernels in both untuned and autotuned studies.
 
-## Why batch invariance matters for RL
+## What is batch invariance, and why does it matter for RL?
 
-Consider a linear layer with activations `A[M, K]`, weights `W[N, K]`, and output `Y[M, N] = A @ W.T`. The token count M changes throughout serving and training. N and K describe the weight shape.
+### What is batch invariance?
 
-A batch-invariant GEMM returns the same output bits for a token whether it runs alone, alongside other tokens, at another row position, or as part of a larger prefill. Its result depends on that token's inputs and the fixed numerical contract for the weight.
+Consider a GEMM `A[M, K] × B[K, N] = C[M, N]`. Each row of A holds one token's activations; B holds the weights in the layout used for multiplication (`B = W.T` for a linear layer). M is the number of token rows, while N and K describe the fixed weight shape.
 
-Several related properties matter:
+A **bitwise batch-invariant** GEMM gives a token exactly the same output bits regardless of its row position, its neighboring rows, or the total number of rows in the call. Hold the token's input values, B, dtypes, supplied quantization scales, and numerical contract fixed. The requirement is equality of the stored bits, stronger than agreement within a numerical tolerance.
+
+Two transformations make this concrete:
+
+**Permutation invariance.** Reorder the rows of A with a permutation P. The rows of C must follow the same permutation, with every token retaining its output bits. The entire output tensor is therefore permutation-equivariant: it moves with the input. The per-token result is invariant.
+
+![Colored GEMM rows illustrate permutation invariance: reordering A into rows r2, r0, r3, r1 reorders C the same way while preserving each row's BF16 output bits. The weight matrix B is fixed.](/assets/imgs/rl-ready-kernels/batch-invariance-permutation.svg)
+
+*Permutation invariance: row colors follow token identity through `A × B = C`. The example displays C as BF16 bit patterns in hexadecimal; those patterns move intact with their input rows.*
+
+**Sub-batch invariance.** Split A into smaller batches of rows and run each against the same B. Concatenating their outputs must reproduce the full-batch C bit for bit. In the example, `A0 = A[0:2]` and `A1 = A[2:4]` each have M=2, while the original call has M=4. The equality must survive this change in batch size, including any admitted change in the kernel's launch configuration.
+
+![A full four-row GEMM and two separate two-row GEMMs use the same B. Concatenating the two smaller output matrices reproduces every BF16 output bit of the full result.](/assets/imgs/rl-ready-kernels/batch-invariance-subbatch.svg)
+
+*Sub-batch invariance: the smaller results `C0` and `C1` concatenate to the original C. Only M is partitioned; the weight matrix and the reduction dimension K remain fixed. Both diagrams are illustrative GEMMs showing the required property.*
+
+These transformations rearrange activation rows for the same logical tokens. They do not change token order within a prompt or alter the tokens' attention context.
+
+### Why it matters for RL
+
+RL exercises both transformations routinely. Rollout scheduling changes which token rows share a GEMM, while training microbatches group those rows differently. Matching rollout and training also requires distinguishing several related properties:
 
 | Property | What must remain equal |
 | --- | --- |
@@ -36,33 +56,121 @@ Several related properties matter:
 
 Determinism alone covers the first row. A deterministic kernel can still change its result when M changes. Likewise, two independently batch-invariant implementations can define different accumulation orders. Matching a rollout engine and a trainer requires agreement on the numerical contract as well as invariance within each implementation.
 
-This distinction is relevant when the trainer re-scores a sampled response. With the same policy weights and inputs, the rollout probabilities and recomputed probabilities should describe the same numerical policy. A discrepancy introduced by batching or kernel selection adds a source of drift before an update has occurred.
+This distinction matters when the trainer re-scores a sampled response. At identical weights and forward semantics, the ratio `exp(logp_train - logp_rollout)` should be 1. A discrepancy introduced by batching or kernel selection moves that ratio before any policy update has occurred. It can affect importance weights and clipping decisions, and makes it harder to separate an algorithmic change from implementation drift. Kernel consistency removes one source of disagreement; it does not remove intentional policy changes or stale-weight effects in asynchronous RL.
 
-The [vLLM and TorchTitan demonstration](https://vllm.ai/blog/2025-11-10-bitwise-consistent-train-inference) illustrates the need to coordinate complete forward passes. [SGLang's work on deterministic inference and reproducible RL](https://www.lmsys.org/blog/2025-09-22-sglang-deterministic/) shows how batching, chunked prefill, sampling, and training settings interact. FlashInfer supplies consistent primitives for that broader integration.
+[SGLang's work on deterministic inference and reproducible RL](https://www.lmsys.org/blog/2025-09-22-sglang-deterministic/) examines the interaction with chunked prefill, prefix caching, CUDA graphs, and per-request sampling seeds. Its experiments with slime also connect deterministic inference to reproducible training runs in a tested setup. These systems features make batching and request partitioning routine execution choices. Numerical consistency must survive them for an RL pipeline to remain reproducible.
+
+The [October 2026 vLLM train-inference consistency post](https://vllm.ai/blog/2026-10-14-train-inference-consistency) extends the integration perspective: its training forward calls inference kernels, and alignment covers low-precision computation, KV-cache reads, routing, and reductions. Sharing an accumulation order in one GEMM is therefore one part of a matching forward pass. FlashInfer's contribution here is to make that GEMM contract explicit and verifiable, while keeping room to optimize its execution. This gives framework integrations a concrete starting point: compare forward values before attributing a divergence to the learning algorithm. The performance study below measures these primitives, rather than end-to-end RL throughput.
 
 ## The performance tension
 
 The shapes that make a GPU efficient change dramatically between decode and prefill. With thousands of token rows, a GEMM has many independent output tiles. With one or a few rows, the kernel needs other ways to expose enough parallel work and keep memory transfers efficient.
 
+Kernel libraries typically implement heuristics that recommend a kernel and configuration expected to perform well for a given problem. A heuristic can consider M, N, K, dtype, layout, and GPU properties. As the batch changes, the recommendation can change too, even for the same weight and logical input row.
+
 High-performance implementations adapt tile dimensions, use different tensor-core instructions, change persistent scheduling, or partition the reduction across K. Those choices become a numerical problem when they change the sequence of operations used for an output element.
 
-Increasing accumulation precision helps accuracy, but FP32 additions still depend on order. Freezing an entire launch configuration also leaves useful hardware choices unexplored. The opportunity is to identify which choices determine the arithmetic and which choices only place that arithmetic on the GPU.
+Increasing accumulation precision helps accuracy, but FP32 additions still depend on order: each addition rounds its result, and regrouping the same terms can change which small contributions survive. Two common GEMM optimizations illustrate why this matters even when the inputs and output dtype stay the same.
 
-FlashInfer makes that distinction explicit. A **numerical class** defines the operations. An admitted **configuration** implements the class using a particular placement. The dispatcher and autotuner choose among configurations that agree on the numerical result.
-
-### The tensor-core instruction is part of the numerics
-
-Split-K is a common example of an optimization that changes accumulation order. Switching the tensor-core instruction family can do so as well, even on the same GPU.
+### Tensor Core instructions
 
 SM100-family GPUs, including SM107 in Vera Rubin NVL4, can execute Ampere-style warp-level `mma.sync` instructions as well as SM100-style `tcgen05.mma` instructions. Warp-level MMA operates on register fragments, while `tcgen05` uses asynchronous execution and tensor-memory accumulators, with different staging and completion costs. The Ampere-style path has lower instruction latency, which can make it useful for latency-bound BF16 GEMMs with very few token rows. FlashInfer's tinygemm backend uses this approach; its SM100-family implementation issues `mma.sync.aligned.m16n8k16` with BF16 operands and FP32 accumulators.
 
 Those two instruction families need not group and accumulate products in the same order. BF16 inputs and FP32 accumulation therefore do not, by themselves, establish numerical equivalence. A dispatcher that selects warp-level MMA for a small M and `tcgen05` for a larger M can change a token's output bits as the batch changes. Each path may be deterministic on its own while the combination fails batch invariance.
 
-For the invariant mode, the instruction primitive is part of the numerical class. An implementation may tune admitted variants that preserve that primitive's per-element behavior; switching to another instruction family requires establishing the same bitwise contract. This is why the instruction choice belongs alongside reduction partitions and rounding points in the specification. Tinygemm illustrates the numerical issue here; it is not included in the performance comparison below.
+![A batch-dependent dispatcher selects warp-level MMA or tcgen05. Two illustrative FP32 reduction trees over the same terms produce 1 and 0, with different BF16 output bits.](/assets/imgs/rl-ready-kernels/tensor-core-numerics.svg)
 
-## A numerical contract behind the API
+*The scalar trees illustrate the effect of regrouping; they do not claim to describe either instruction's internal accumulation order. With x = 2²⁵ and round-to-nearest-even FP32 addition, `(x + (-x)) + 1` is 1, while `x + ((-x) + 1)` is 0. Both results remain different after BF16 conversion.*
 
-The public GEMM APIs select the mode with `batch_invariant=True` and `backend="auto"`:
+The instruction family is therefore a numerical choice as well as a performance choice. A fixed-shape repeatability test would miss the disagreement between the two paths. Tinygemm serves as an educational example here and is outside the performance study below.
+
+### Split-K
+
+Split-K is another common GEMM optimization. When M and N provide too few output tiles to occupy the GPU, multiple thread blocks can work on different segments of K. Each segment starts a new accumulator, and a later reduction combines the partial results. This exposes more parallel work, at the cost of partial-result traffic and a reduction step.
+
+Restarting the accumulator changes the computation. An uninterrupted dot product rounds after each accumulation into one running state; a split computation rounds within each partial and again when combining them. Even a deterministic, index-ordered fixup can produce different bits from the uninterrupted fold. If the dispatcher changes the split count or boundaries with M, the same row can therefore change bits as the batch grows.
+
+![The terms x, 1, minus x, 1 accumulate to 1 without splitting and 0 with two chunks and an ordered fixup, using FP32 rounding and x equal to 2 to the power 25.](/assets/imgs/rl-ready-kernels/split-k-numerics.svg)
+
+*The two paths are each deterministic, but their accumulation restarts differ. Selecting between them by batch size breaks batch invariance. This example needs no unordered atomics.*
+
+Combining partials with floating-point atomics adds another issue: if their arrival order varies between launches, the result can also lose run-to-run determinism. These are distinct failure modes. A fixed reduction order addresses repeatability, while batch invariance also requires agreement across the execution paths selected for different batch sizes.
+
+A common way existing batch-invariant GEMM APIs avoid this issue is to **disable split-K altogether**, keeping each output's K reduction uninterrupted. [Thinking Machines Lab's discussion of batch-invariant matrix multiplication](https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/) describes this straightforward approach. It avoids batch-dependent partitioning, but gives up a useful performance optimization precisely when small M and N provide too little parallel work.
+
+## Designing fast kernels around a fixed numerical dataflow
+
+FlashInfer's approach is to **fix the numerical dataflow, then optimize how the GPU executes it**. We developed the kernels in a generation harness that co-designs the numerical specification, Lean model, and kernel engine. Each candidate implementation must preserve the declared computation while exposing performance choices that are numerically interchangeable.
+
+### Numerical classes fix the arithmetic
+
+A **numerical class** specifies the rounded operations that produce one logical output element. It fixes the tensor-core primitive and its K-step width, the accumulator's initial value, the order of those steps, any chunk boundaries and partial-result fold, and the scaling, bias, and output-conversion chain. We call this per-element graph of operations the **canonical dataflow**. It is more specific than the real-valued equation `C = A × B`.
+
+For example, the unsplit BF16 class starts from +0, executes the declared tensor-core steps in ascending K order with FP32 accumulation, and converts the completed accumulator to the output dtype once. Its biased variant adds bias to the fully reduced FP32 value before conversion. Low-precision classes also specify how their scales enter the computation. A different instruction primitive or reduction grouping defines a different class, even if both implementations are accurate approximations of the same matrix product.
+
+An execution **configuration** chooses how to implement that class: tile sizes, cluster geometry, staging, raster order, and which CTA owns each piece of work. All admitted configurations within the same numerical class follow the same canonical dataflow and therefore share the **exact same numerics** for the same logical inputs. Changing the arithmetic requires a new specification fingerprint and renewed validation.
+
+This gives a kernel-selection heuristic a clear rule for preserving bitwise batch invariance: for fixed N, K, operand format, and supported environment, choose configurations only from the selected numerical class. The heuristic can still depend on M and available GPU parallelism, recommending a smaller tile for decode and a larger tile for prefill, provided both belong to that class. Autotuning can search the same space. Switching between classes as M changes, such as a `tcgen05.mma` class and a warp-level `mma.sync` class, does not provide this bitwise guarantee.
+
+![Two illustrative numerical classes use tcgen05 MMA and warp-level mma.sync respectively. Tile and scheduling variants within either class share its dataflow and numerics; a batch-size-dependent switch between the classes is not permitted by the invariant contract.](/assets/imgs/rl-ready-kernels/numerical-class-configurations.svg)
+
+*A heuristic may choose any admitted configuration within the selected class. It must preserve that class as M changes for a fixed weight shape. The two instruction families illustrate distinct numerical contracts; configurations within each class vary only in ways that preserve its dataflow.*
+
+### Co-designing the proof and the kernel engine
+
+The development harness gives kernel-generation agents a shared contract: produce the numerical specification, the kernel implementation, the Lean model and conformance cases, and the bitwise tests together. Performance tuning operates under the same contract. A faster candidate that changes the bits does not qualify as another configuration of that class.
+
+The specification is executable. A reduction describes ordered folds over tensor-core K steps and, when present, over chunks. An elementwise epilogue declares the operations after that reduction. The canonical engine lowers these objects into a plan; the GEMM mainloop executes its blocked instruction sequence, and the epilogue uses the shared operation chain. The kernel body supplies loaders, staging, synchronization, and stores around that computation.
+
+The engine can also execute against a symbolic algebra, emitting the operation expressions rather than GPU instructions. Generated cases connect these expressions, the enumerated configuration records, and dispatcher selections to an independently written Lean model. This coupling checks that the proof describes the dataflow and configuration space used by the generator. An exact CPU evaluator checks the explicitly modeled floating-point operations; tensor-core instructions remain named, opaque primitives.
+
+![The numerical specification enters a canonical engine, which emits a GPU implementation and symbolic expressions. Lean checks dataflow identities, while bitwise GPU tests check implementation agreement and hardware assumptions.](/assets/imgs/rl-ready-kernels/canonical-dataflow.svg)
+
+*Specification, engine, and proof are developed together. Symbolic conformance connects the Python generator to Lean; GPU conformance checks the implementation and the hardware assumptions that the proof leaves opaque.*
+
+Lean proves identities about reduction placement, blocked-loop execution, and ordered split reductions. Its launch model states determinism, batch invariance, permutation invariance, and sub-batch invariance. Configuration-space checks separately establish that the dispatcher's generated choices belong to the admitted space. The [implementation documentation](https://github.com/flashinfer-ai/flashinfer/blob/3db2f474e4053a6400d3128ba0683cbd4a05f5a4/flashinfer/batch_invariant/README.md) describes the classes, conformance tests, and proof-checking commands.
+
+The proof boundary is explicit. Tensor-core operations are opaque primitives in the model. Bitwise GPU tests check that the admitted instruction and tiling variants implement the assumed per-element function, alongside batch and configuration agreement. The result is **Lean-verified numerical dataflow backed by bitwise GPU conformance checks**; compiler correctness, hardware internals, and complete CUDA concurrency are outside these proofs. The proof repository also checks its trust policy: no `sorry`, Lean's standard axioms, and a named set of exhaustive checks using `native_decide`.
+
+### Partitioning N and K to retain split-K
+
+Batch invariance holds the weight dimensions N and K fixed while token rows change. That gives us room to choose different numerical classes for different weight shapes. FlashInfer partitions this space into an **uninterrupted K-fold region** and an **ordered chunk-fold region**. Within the latter, separate classes fix chunk counts C = 2, 4, 8, and higher. Format and architecture also participate in class selection; M does not.
+
+![A schematic N/K plane assigns narrow-N, long-K weights to ordered chunk-fold classes and other weights to uninterrupted K-fold classes. Each selected class stays fixed from decode through prefill while execution configurations can change.](/assets/imgs/rl-ready-kernels/numerical-class-partition.svg)
+
+*A weight shape selects its numerical class independently of batch size. The split region contains several fixed chunk-count classes. This diagram is schematic; the policy-derived maps below include the actual alignment and size constraints.*
+
+For a chunked class, each of C fixed K segments starts from a fresh +0 accumulator. The FP32 partials are then added from +0 in chunk-index order, followed by the declared epilogue. A weight that uses these boundaries at decode retains them at prefill. The Lean split-reduction model establishes equality to this chunked specification independently of the assignment of chunks to CTAs.
+
+The execution can still change substantially as M changes:
+
+- Different CTAs compute partials into an index-addressed workspace; a fixup kernel folds them in order.
+- One CTA computes successive chunks and retains the ordered running sum in tensor memory.
+- Admitted block-scaled configurations exchange partials within a cluster and apply the same ordered fold.
+
+These are placements of the same chunked computation. In particular, running every chunk inside one CTA does not turn it into an uninterrupted K fold: accumulator restarts and the ordered partial additions remain. This preserves the numerical contract while allowing a small batch to expose more parallel work and a large batch to avoid a global partial-result buffer.
+
+Split-K preserves batch invariance when the same chunked dataflow applies at every M. The class rule uses the fixed weight shape to retain splitting where it helps. Changing tensor-parallel degree or slicing a weight changes N or K and therefore requires a separate consistency analysis.
+
+### Where do the N/K class boundaries fall?
+
+These boundaries are implemented by an **analytical heuristic over the fixed weight dimensions**. The rule is designed to expose more parallel work where it is scarce while controlling the cost of splitting:
+
+1. **Check the parallelism supplied by N.** Consider splitting only when `ceil(N / 32) < 256`; wider outputs already supply many independent tiles.
+2. **Limit partial-result traffic.** Require `C <= floor(K / (16*N))`. For BF16, this bounds the FP32 partial-buffer round trip to one quarter of the BF16 activation bytes. Long K relative to N leaves more room for useful splitting.
+3. **Keep each chunk useful and aligned.** Each chunk must contain whole format granules and at least 256 K elements. Choose the largest power-of-two C up to 128 satisfying all constraints, or C=1 when none qualifies.
+
+Together, these rules place the chunked classes mainly in narrow-N, long-K regions. Power-of-two counts create stepped boundaries, and divisibility constraints create stripes and cutouts. The rule uses the appropriate granule for each format and never takes M as an input. Ordinary unsharded transformer shapes often remain unsplit.
+
+On SM107, NVFP4 has another N/K-dependent choice: ordinary unsplit regions use a 128-element MMA step, while split regions use its 64-element step. Both decisions depend on the fixed weight shape. Neither depends on M.
+
+![N/K class boundaries for BF16 and NVFP4 on SM107, evaluated from the analytical heuristic and colored by fixed chunk count. The rule balances N parallelism, partial-result traffic, and chunk size and alignment.](/assets/imgs/rl-ready-kernels/class-regions-boundaries.svg)
+
+*Numerical-class boundaries evaluated from FlashInfer's analytical selection rule, independently of M. Colors show the selected chunk count; alignment-dependent stripes reflect whole-chunk granules. The maps show the boundaries without benchmark-shape overlays and extend beyond the measured dimensions to illustrate the policy. They are not performance heatmaps. Reproducer data covers FP8, MXFP8, and MXFP4 as well.*
+
+## Enabling batch-invariant GEMMs in FlashInfer
+
+The numerical-class selection and configuration dispatch are exposed through a new **`batch_invariant=True`** input flag on FlashInfer's public GEMM APIs. The flag requires **`backend="auto"`**. Together, they select the batch-invariant mode, which chooses the numerical class from the fixed weight dimensions and selects execution configurations within that class:
 
 ```python
 import flashinfer
@@ -75,7 +183,7 @@ y = flashinfer.mm_bf16(
 )
 ```
 
-The mode provides its own implementation and validates its supported inputs. Unsupported combinations raise an error. Its autotuner searches within the invariant configuration space.
+The mode validates its supported inputs; unsupported combinations, including an explicitly selected backend other than `"auto"`, raise an error. Its heuristic and autotuner both stay within the selected class's invariant configuration space.
 
 | Public API | Input format |
 | --- | --- |
@@ -98,73 +206,15 @@ y = flashinfer.mm_fp4(
 )
 ```
 
-For an unsplit BF16 GEMM, the contract is a sequence of tensor-core K steps with FP32 accumulation from an initial +0, followed by one output conversion. The biased variant adds the bias once to the fully reduced FP32 accumulator before conversion. Other formats define their own instruction steps and scale application.
-
-The contract is more specific than a real-valued matrix product. It includes the accumulation structure, scale operations, and rounding points that determine the output bits. FlashInfer gives each class a fingerprint, scoped to its defining dimensions, library version, and architecture.
+The selected class has a fingerprint, scoped to its defining dimensions, library version, and architecture. The same mode and numerical inputs must be used on both sides of a consistency comparison.
 
 The inputs to that contract must also stay consistent. For example, recomputing an activation scale over a changing batch can change the quantized operands before a GEMM starts. A batch-invariant GEMM preserves its own computation; the surrounding pipeline must supply the same numerical inputs.
 
 That architecture scope matters on Rubin. Some block-scaled instructions process a wider K step than their Blackwell counterparts. FlashInfer treats those as distinct classes and makes the selection independent of token count. The API does not promise that changing the GPU architecture or weight partitioning preserves every bit.
 
-## Canonical dataflow, Lean proofs, and a kernel engine
-
-FlashInfer defines the numerical specification separately from the performance configuration. A canonical reduction engine lowers that specification into an ordered plan. The GEMM mainloop uses that lowering to issue its tensor-core steps, and the epilogue applies the declared scaling, bias, and conversion chain.
-
-The same engine can emit symbolic expressions. Those expressions connect the Python specification and lowering to a Lean model of the dataflow.
-
-
-![The numerical specification enters a canonical engine, which emits a GPU implementation and symbolic expressions. Lean checks dataflow identities, while bitwise GPU tests check implementation agreement and hardware assumptions.](/assets/imgs/rl-ready-kernels/canonical-dataflow.svg)
-
-*The numerical specification fixes the computation; placement choices determine its execution. Lean verification and GPU conformance checks cover distinct parts of the implementation chain.*
-
-
-### What the proofs establish
-
-The Lean development proves identities about reduction placement, blocked-loop execution, and ordered split reductions. Its launch model states the batch, permutation, and sub-batch invariance properties. Generated conformance cases compare Lean's expressions with those emitted by the Python specification and engine, and check configuration-space and dispatcher constraints.
-
-This allows performance choices to remain flexible. Tile ownership, cluster geometry, raster order, and other admitted placements can depend on M. They preserve the class's per-element arithmetic.
-
-The proof boundary is explicit. Tensor-core operations are opaque primitives in the model. GPU configuration-agreement tests check that the admitted instruction and tiling variants implement the assumed per-element function. The result is **Lean-verified numerical dataflow backed by bitwise GPU conformance checks**; compiler correctness, hardware internals, and complete CUDA concurrency are outside these proofs.
-
-The proof repository also checks its trust policy: no `sorry`, Lean's standard axioms, and a named set of exhaustive checks that use `native_decide`. The [implementation documentation](https://github.com/flashinfer-ai/flashinfer/blob/3db2f474e4053a6400d3128ba0683cbd4a05f5a4/flashinfer/batch_invariant/README.md) explains the classes, supported inputs, conformance tests, and commands for checking the proofs.
-
-### Split-K can preserve batch invariance
-
-Split-K partitions a dot product into partial reductions. The numerical issue is how those partitions and their combination change as M changes.
-
-FlashInfer defines a chunked numerical class for selected weight shapes. Each chunk starts with a fresh accumulator. The chunk partials are then added in a fixed index order with specified FP32 operations, followed by the epilogue chain.
-
-The chunk count depends on **N, K, and the operand format**. It does not depend on M. A weight that uses this class at decode uses the same chunk boundaries at prefill.
-
-There are several ways to execute that class:
-
-- Different CTAs compute partials into an index-addressed workspace; a fixup kernel folds them in order.
-- One CTA computes successive chunks and retains the ordered running sum in tensor memory.
-- Admitted block-scaled configurations exchange partials within a cluster and apply the same ordered fold.
-
-These placements implement the chunked specification. The chunked specification can differ from a single uninterrupted K fold, so switching freely between arbitrary split and unsplit arithmetic would change the contract.
-
-FlashInfer's weight-shape policy considers splitting when N supplies too little parallel work. It aligns chunks to whole format granules, enforces a minimum chunk length, and limits the extra FP32 partial traffic. Ordinary unsharded transformer shapes often remain unsplit. Narrow-N, long-K shapes expose the cases where controlled splitting is useful.
-
-This is also how to interpret coverage over the non-batch dimensions: each N/K region selects a numerical class, and that class remains consistent as M changes. Changing tensor-parallel degree or slicing a weight can change those fixed dimensions and requires a separate consistency analysis.
-
-### Where do the N/K class boundaries fall?
-
-There are two broad reduction families—an uninterrupted K fold and an ordered chunk fold—with separate chunked classes for C=2, 4, 8, and higher. The precise numerical class also includes the format, instruction primitive, scale chain, and rounding points.
-
-For the inspected policy, splitting is considered only when `ceil(N / 32) < 256`. The policy chooses the largest power-of-two C up to 128 that satisfies three constraints: `C <= floor(K / (16*N))`, each chunk contains whole format granules, and each chunk has at least 256 K elements. It uses C=1 when no larger count qualifies. For BF16, the traffic constraint bounds the FP32 partial-buffer round trip to one quarter of the BF16 activation bytes. The same count rule uses the appropriate granule for the other formats.
-
-On SM107, NVFP4 has another N/K-dependent choice: ordinary unsplit regions use a 128-element MMA step, while split regions use its 64-element step. Both decisions depend on the fixed weight shape. Neither depends on M.
-
-
-![Policy-derived N/K maps for BF16 and NVFP4 on SM107, colored by fixed chunk count. Circles mark the primary transformer shapes and crosses mark split-region ablation shapes.](/assets/imgs/rl-ready-kernels/class-regions.svg)
-
-*Numerical-class regions evaluated from FlashInfer's actual policy, independently of M. The alignment-dependent stripes reflect whole-chunk granules. The map extends beyond the measured shapes to illustrate the policy; it is not a performance heatmap. Reproducer data covers FP8, MXFP8, and MXFP4 as well.*
-
-
 ## GEMM performance on NVIDIA Vera Rubin NVL4
 
-We evaluate decode, middle-sized batches, and prefill using eight transformer projection shapes. M is the number of token rows; N and K are the output and input dimensions of a weight.
+We evaluate decode, middle-sized batches, and prefill using eight representative transformer projection shapes. The selected N and K values cover common hidden, attention, and feed-forward dimensions: N is the output dimension and K is the input dimension of a weight. M is the number of token rows.
 
 | Projection archetype | N | K |
 | --- | --- | --- |
@@ -177,9 +227,82 @@ We evaluate decode, middle-sized batches, and prefill using eight transformer pr
 | FFN down projection | 8192 | 28672 |
 | Output-sharded projection | 1024 | 28672 |
 
-The M sweep is 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, and 8192. Separate diagnostic shapes cover narrow-N/long-K split-K regimes. These are GEMM projection archetypes, not complete-model benchmarks.
+The M sweep covers decode (M ≤ 16), middle-sized batches (16 < M < 1024), and prefill (M ≥ 1024). Separate narrow-N/long-K shapes probe the split-K region. The measurements characterize representative GEMMs, with each shape/M pair weighted equally in its regime.
 
-### Methodology
+For BF16, **FI batch invariant** is compared with the batch-invariant paths from PyTorch Inductor/Triton, vLLM Triton, and DeepGEMM deterministic BF16. The non-BI comparators are FlashInfer's regular CUTLASS, cuDNN, and CuTe DSL backends; BF16 CuTe DSL is included only for decode (M ≤ 16). BI labels describe the selected paths within the validated shape matrix.
+
+For NVFP4, we compare FI batch invariant with **vLLM BI W4A4** and the non-BI FI CuTe DSL backend. Both operands are prequantized, so the measurement isolates GEMM; all paths return BF16 output.
+
+Every comparator appears in both untuned and autotuned studies. Backends with no runtime tuning interface retain their upstream table, heuristic, or fixed configuration in both studies. See the [methodology and software appendix](#appendix-methodology) for timing procedures, versions, build targets, tuning modes, and correctness scope. The [full latency curves](#appendix-latency-curves) retain the per-shape detail.
+
+### BF16 results
+
+The autotuned FI batch invariant GEMM is faster in geometric mean than every measured BI competitor in decode and middle regimes. At prefill it is faster than the measured PyTorch Inductor/Triton and vLLM Triton paths and near parity with DeepGEMM (0.99×). Against non-BI backends, it is close to cuDNN, slower than the decode-only BF16 CuTe DSL path, and faster than the measured regular CUTLASS path.
+
+Each bar is comparator latency divided by its matched FI batch invariant latency. **Above 1× favors FI batch invariant.** The top row is untuned and the bottom row is autotuned. BI comparator names are bold and tagged **[BI]**; other names are tagged [non-BI].
+
+![BF16 bar charts with untuned and autotuned studies in separate rows and decode, middle, and prefill columns. Batch-invariant comparator labels are bold and explicitly marked BI; other labels are marked non-BI.](/assets/imgs/rl-ready-kernels/bf16-overview.svg)
+
+*Equal-case geometric means on NVIDIA Vera Rubin NVL4. The dashed 1× line is FI batch invariant. The untuned and autotuned BF16 rows use different labeled log-axis ranges. FI CuTe DSL is decode-only. vLLM and DeepGEMM retain their upstream table and heuristic in both rows.*
+
+PyTorch's untuned row uses its deterministic candidate selector without profiling. Triton profiling gives a much stronger comparison; the autotuned row is the relevant reference for its best measured configuration. Detailed selection modes and the separate narrow-N correctness probe are described in the [appendix](#appendix-methodology).
+
+### Prequantized NVFP4 results
+
+FI batch invariant is close to the regular FI CuTe DSL backend across the representative shapes, and faster in geometric mean than vLLM BI W4A4 in every regime. With autotuning, FI batch invariant has approximately 12% higher decode latency and 4% higher middle-regime latency than regular CuTe DSL, with approximately equal prefill latency. The narrower output shape has a larger cost, which remains visible in the [per-shape curves](#appendix-latency-curves).
+
+![NVFP4 bar charts with untuned and autotuned studies in separate rows. The vLLM BI W4A4 comparator is bold and marked BI, while regular FI CuTe DSL is marked non-BI.](/assets/imgs/rl-ready-kernels/nvfp4-overview.svg)
+
+*The same ratio as BF16: comparator latency / FI batch invariant latency; above 1× favors FI batch invariant. Both operands are prequantized and output is BF16. vLLM BI W4A4 keeps its fixed upstream configuration in both rows. These are GEMM timings on NVIDIA Vera Rubin NVL4.*
+
+### Hypothetical study: giving up split-K
+
+**Suppose we had disabled split-K to simplify batch invariance.** We evaluate this hypothetical design choice using actual measurements of an unsplit alternative to FlashInfer's chunked numerical classes. The study covers eight shapes inside the split region, with policy-selected C ranging from 2 to 32, at M=1, 16, 128, 1024, and 8192. These narrow-output shapes form a separate ablation from the primary transformer matrix.
+
+The ablation forces C=1 through FlashInfer's internal class entry point and uses its unchanged dispatcher and autotuner for that class. Both sides receive identical operands and use the same MMA primitive and epilogue. For NVFP4, both sides retain the split region's 64-element primitive; the ablation does not also switch to the ordinary unsplit region's wider instruction. Tuning profiles the same top-configuration policy separately for each class.
+
+Removing chunking changes the reduction contract, so the two sides need not return identical bits. Each side must independently pass batch-invariance checks, and its tuned result must equal its own default result bit for bit.
+
+We express the ablation as **performance retained after giving up split-K**:
+
+`retained performance = unsplit throughput / policy-class throughput = policy-class latency / unsplit latency`
+
+A value of 0.5× means half the performance, or a 50% loss; 1× means no change. With autotuning, giving up split-K retains **0.47×** BF16 decode performance (a **53% loss**) and **0.69×** NVFP4 decode performance (a **31% loss**) in geometric mean over the selected split-region shapes.
+
+![Measured retained performance under a hypothetical policy that disables split-K, with untuned and autotuned rows and decode, middle, and prefill columns. Ratios below 1 show the performance lost relative to policy-selected chunking.](/assets/imgs/rl-ready-kernels/splitk-retained-performance.svg)
+
+*A measured ablation of a hypothetical no-split policy. Both classes are independently batch invariant. Values below the dashed 1× line show the cost of removing chunking; values above 1× show an improvement. The same MMA primitive and epilogue are retained on both sides.*
+
+Some prefill cases improve without chunking, and these remain above 1×. For tuned BF16 at N=128, K=65536, removing split-K retains about 0.17× performance at M=1 (an 83% loss), but reaches 1.35× at M=8192 (a 35% improvement). A fixed chunk contract exposes decode parallelism and also fixes the arithmetic that larger batches must retain. Autotuning improves the aggregate tradeoff without making every chunked case faster.
+
+![Every split-region shape/M ratio expressed as performance retained without split-K, with values below 1 indicating losses and values above 1 indicating improvements.](/assets/imgs/rl-ready-kernels/splitk-ablation.svg)
+
+*The hypothetical no-split policy uses the same retained-performance definition as the bars. Every measured shape/M pair is shown, with untuned and autotuned rows. Exact ratios, absolute latencies, and raw samples are retained in the reproduction artifacts.*
+
+## From consistent GEMMs to consistent RL
+
+GEMMs account for a large part of a model's forward pass, but phase consistency spans the rest of that pass too. Attention must preserve a token's computation across prefill, decode, and KV partitioning. Normalization and log-probability reductions need stable numerical contracts. Quantization scales, fused activations, and tensor-parallel collectives must agree between the trainer and rollout engine. Sampling also needs request-level random-state semantics when reproducible responses are required.
+
+FlashInfer's current-main work extends the numerical-contract approach beyond the GEMMs introduced in v0.7.4. Its batch-invariant attention classes define fixed absolute KV tiles and chunks shared by supported prefill and decode wrappers. Quantization and sampling/log-probability APIs have their own specified chains and conformance checks. These features have individual input and execution constraints, documented alongside their APIs.
+
+For an RL framework, the integration task is to use the same contract for each matching forward computation. A kernel-level guarantee does not establish deterministic training updates or prove that two complete model implementations agree. It provides a stable building block for doing that work.
+
+The engineering direction is to make numerical behavior an explicit part of the API. Once the dataflow is fixed and checked, performance work can explore how to execute it efficiently—from one-token decode to large prefill—while preserving the computation that the RL pipeline relies on.
+
+## Reproduce the measurements
+
+The [reproduction bundle](/assets/data/rl-ready-kernels/flashinfer-rl-study.tar.gz) contains the exact measured harness snapshots, backend adapters, source and environment manifests, selected tuning configurations, generated-code provenance, correctness checks, raw per-iteration timing samples, absolute-latency CSVs, and figure scripts. It also includes the N/K class-policy map and both modes of the split-K ablation. The [archive checksum](/assets/data/rl-ready-kernels/SHA256SUMS) and the bundle's internal file checksums allow the artifacts to be verified before rerunning them.
+
+The guide inside the bundle explains source provisioning, idle-device admission, exact-snapshot replay, and figure regeneration. Kernel timings describe the stated implementations and shapes on NVIDIA Vera Rubin NVL4; they do not imply end-to-end RL speedups.
+
+The [CPU-only figure reproducer](/assets/data/rl-ready-kernels/figure-reproducer.zip) contains the plotting scripts and frozen analysis inputs for the current figures. The [display ratios](/assets/data/rl-ready-kernels/display-ratios.csv) and [split-K retained-performance cells](/assets/data/rl-ready-kernels/splitk-retention-cells.csv) expose the exact values behind the bars and heatmap. [Figure-artifact checksums](/assets/data/rl-ready-kernels/FIGURE_SHA256SUMS) accompany these files; the original measurement bundle is retained unchanged.
+
+<a id="appendix-methodology"></a>
+
+## Appendix: methodology and software
+
+The main results use the following environment, timing procedure, backend configurations, and correctness checks. The full token-count sweep is M=1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, and 8192.
+
 
 The device is NVIDIA Vera Rubin NVL4, SM107, with 212 SMs and 126 MiB of L2. The reproducibility artifacts record exact source commits, compiler and library versions, device UUIDs, input recipes, generated-code provenance, and timing samples. Measurements use only reserved, idle GPUs 2 and 3 on the host.
 
@@ -188,7 +311,6 @@ The device is NVIDIA Vera Rubin NVL4, SM107, with 212 SMs and 126 MiB of L2. The
 | NVIDIA driver / CUDA compiler | 620.43 / 13.4.92 |
 | PyTorch | 2.14.1+cu132 |
 | CuTe DSL / CUPTI Python | 4.8.1 / 13.5.0 |
-| cuTile | 1.8.0 |
 | cuDNN library / frontend | 9.24.0.43 / 1.32.2 |
 | FlashInfer source | `3db2f474e4053a6400d3128ba0683cbd4a05f5a4` |
 | vLLM source | `aeadf9252586e9db0e7658312d562036b45cd217` |
@@ -203,7 +325,7 @@ Each case has 50 samples per round. Across the campaign, the median spread betwe
 
 Both studies return BF16 output. The NVFP4 study uses identical prequantized packed operands, block-scale values, and alpha across implementations. It measures **GEMM only**. Activation quantization and weight preparation are outside the timing boundary.
 
-BF16 compares FlashInfer's invariant GEMM with its regular CUTLASS, CuTe DSL, cuDNN, and cuTile backends. It separately compares PyTorch `torch.compile` using TorchInductor's batch-invariant option, vLLM's persistent Triton kernel, and DeepGEMM's deterministic BF16 kernel. These have separate rows throughout the study. The regular backends provide performance context; they do not supply the invariant contract measured here. We restrict the BF16 CuTe DSL comparison to decode (M <= 16); its middle and prefill entries are unavailable.
+BF16 compares FlashInfer's invariant GEMM with its regular CUTLASS, CuTe DSL, and cuDNN backends. It separately compares PyTorch `torch.compile` using TorchInductor's batch-invariant option, vLLM's persistent Triton kernel, and DeepGEMM's deterministic BF16 kernel. These have separate rows throughout the study. The regular backends provide performance context; they do not supply the invariant contract measured here. We restrict the BF16 CuTe DSL comparison to decode (M <= 16); its middle and prefill entries are unavailable.
 
 The PyTorch path is restricted to Triton GEMM code generation with external ATen GEMM fallback disabled. Each problem shape is specialized; generated code and bitwise behavior are checked before admission. This measures the stated Inductor/Triton configuration. The vLLM Triton measurement loads the unchanged upstream kernel and wrapper with its architecture/shape configuration tables; platform queries use this GPU's properties. It measures that named kernel, independently of vLLM's default Rubin dispatch. DeepGEMM uses its native `bf16_gemm_nt` entry with `use_deterministic_algorithms(True)`, which bypasses its cuBLAS dispatch.
 
@@ -217,51 +339,23 @@ Every comparison is reported in both an untuned and an autotuned study. Tuning t
 
 | Backend | Batch Invariant | Untuned study | Autotuned study |
 | --- | --- | --- | --- |
-| FI invariant | Yes | Default selection without profiling | FlashInfer tactic profiling |
+| FI batch invariant | Yes | Default selection without profiling | FlashInfer tactic profiling |
 | FI regular CUTLASS, CuTe DSL, cuDNN | No | Default selection without profiling | FlashInfer tactic profiling |
-| FI cuTile | No | GPU-specific default configuration | Native cuTile exhaustive search |
 | PyTorch Inductor BI/Triton | Yes | Deterministic candidate selection without profiling | Triton candidate profiling |
 | vLLM persistent Triton BI | Yes | Upstream architecture/shape table | Same upstream table; no runtime tuning interface |
-| vLLM invariant W4A4 | Yes | Fixed upstream configuration | Same fixed configuration; no runtime tuning interface |
+| vLLM BI W4A4 | Yes | Fixed upstream configuration | Same fixed configuration; no runtime tuning interface |
 | DeepGEMM deterministic BF16 | Yes | Upstream heuristic | Same heuristic; no native BF16 runtime tuning interface |
 
-The two vLLM paths therefore appear in both studies with their actual selection modes stated. The cuTile timing includes its required output zeroing. Its untuned adapter retains kernel objects through CUDA graph capture and replay; it preserves the upstream kernel and default launch configuration. Accuracy is checked against CPU FP64 reference slices at every measured shape. Invariant paths additionally undergo integer-view bitwise checks across batch sizes and dispatch boundaries. Each performance ratio uses the invariant control measured in the same sweep.
+The two vLLM paths therefore appear in both studies with their actual selection modes stated. Accuracy is checked against CPU FP64 reference slices at every measured shape. Invariant paths additionally undergo integer-view bitwise checks across batch sizes and dispatch boundaries. Each performance ratio uses the invariant control measured in the same sweep.
 
 The PyTorch option passes the primary eight-shape matrix in both modes. A separate narrow-N probe at N=128, K=8192 finds bitwise differences between M=129 and M=8192 in both modes; its reproducer is included, and that path is excluded from the split-region ablation. The comparisons establish behavior for the validated matrix rather than a blanket guarantee for a compiler option.
 
-### BF16 results
 
-<!-- BEGIN GENERATED BF16 RESULTS -->
-The tuned invariant GEMM is faster in geometric mean than every measured batch-invariant competitor in decode and middle regimes. At prefill it is faster than the measured PyTorch Inductor/Triton and vLLM Triton paths and near parity with DeepGEMM (0.99x). Against non-BI comparators, it is close to cuDNN, slower than the decode-only BF16 CuTe DSL path, and faster than the measured regular CUTLASS and cuTile paths. The cost of invariance depends on the comparator and regime.
+### Absolute-latency examples
 
-The ratio below is comparator latency / FlashInfer invariant latency, paired within each sweep. Above 1x favors FlashInfer invariant. The FlashInfer invariant control is **Batch Invariant: Yes** in every row; the column classifies the comparator's selected mode within the validated matrix. The selection methods are defined in the methodology table.
+For absolute-latency examples, the table below fixes N=K=4096 and uses the autotuned study. Each row shows its own matched FI batch invariant control; the full curves and CSV include every measured shape.
 
-| FI selection | Comparator | Batch Invariant | Decode | Middle | Prefill |
-| --- | --- | --- | ---: | ---: | ---: |
-| Untuned | PyTorch Inductor BI / Triton | Yes | 9.03x | 11.49x | 20.89x |
-| Untuned | vLLM persistent Triton BI (upstream table) | Yes | 6.07x | 4.31x | 3.43x |
-| Untuned | DeepGEMM deterministic BF16 (heuristic) | Yes | 1.21x | 1.18x | 0.98x |
-| Untuned | FI regular CUTLASS | No | 1.69x | 1.46x | 2.51x |
-| Untuned | FI cuDNN | No | 0.94x | 0.97x | 1.00x |
-| Untuned | FI cuTile | No | 3.05x | 2.20x | 2.64x |
-| Untuned | FI CuTe DSL (decode only) | No | 0.82x | N/A | N/A |
-| Autotuned | PyTorch Inductor BI / Triton | Yes | 1.31x | 1.60x | 1.59x |
-| Autotuned | vLLM persistent Triton BI (upstream table) | Yes | 6.06x | 4.40x | 3.46x |
-| Autotuned | DeepGEMM deterministic BF16 (heuristic) | Yes | 1.22x | 1.21x | 0.99x |
-| Autotuned | FI regular CUTLASS | No | 1.15x | 1.21x | 1.29x |
-| Autotuned | FI cuDNN | No | 0.94x | 0.99x | 1.00x |
-| Autotuned | FI cuTile | No | 1.82x | 1.71x | 1.39x |
-| Autotuned | FI CuTe DSL (decode only) | No | 0.76x | N/A | N/A |
-
-PyTorch's untuned row uses its deterministic candidate selector without profiling. Normal Triton profiling gives a much stronger comparison; the autotuned row is the relevant reference when assessing the best measured Inductor configuration. vLLM and DeepGEMM retain their upstream table and heuristic in both studies. FI CuTe DSL is compared only through M=16.
-
-![Paired untuned and autotuned BF16 studies, with separate rows for PyTorch Inductor, vLLM Triton, DeepGEMM, and FlashInfer regular backends.](/assets/imgs/rl-ready-kernels/bf16-overview.svg)
-
-*BF16 comparisons on NVIDIA Vera Rubin NVL4. Each ratio uses the invariant control measured with that comparator. Both study modes are shown; a backend without a runtime search retains its stated upstream selection.*
-
-For absolute-latency examples, the table below fixes N=K=4096 and uses the autotuned study. Each row shows its own matched invariant control; the full curves and CSV include every measured shape.
-
-| M | Comparator | Batch Invariant | FI invariant (µs) | Comparator (µs) |
+| M | Comparator | Batch Invariant | FI batch invariant (µs) | Comparator (µs) |
 | ---: | --- | --- | ---: | ---: |
 | 1 | PyTorch Inductor BI / Triton | Yes | 7.94 | 11.65 |
 | 1 | DeepGEMM deterministic BF16 | Yes | 8.08 | 10.11 |
@@ -269,6 +363,12 @@ For absolute-latency examples, the table below fixes N=K=4096 and uses the autot
 | 8192 | PyTorch Inductor BI / Triton | Yes | 81.12 | 115.07 |
 | 8192 | DeepGEMM deterministic BF16 | Yes | 81.92 | 82.78 |
 | 8192 | FI cuDNN | No | 81.41 | 80.86 |
+
+<a id="appendix-latency-curves"></a>
+
+## Appendix: full latency curves
+
+The full primary shape grid is retained below for both selection modes. BI legend names are bold; non-BI paths are explicitly marked. FI BF16 CuTe DSL remains restricted to M ≤ 16.
 
 <details markdown="1">
   <summary>All untuned BF16 latency curves</summary>
@@ -301,75 +401,21 @@ For absolute-latency examples, the table below fixes N=K=4096 and uses the autot
 ![bf16-deepgemm-autotuned: absolute BF16 latency across the complete primary shape grid, with CuTe DSL restricted to decode where applicable.](/assets/imgs/rl-ready-kernels/bf16-deepgemm-autotuned.svg)
 
 </details>
-<!-- END GENERATED BF16 RESULTS -->
 
-### Prequantized NVFP4 results
+<details markdown="1">
+  <summary>All autotuned NVFP4 latency curves</summary>
 
-The invariant mode is close to regular CuTe DSL on most of the eight shapes. The narrow output projection has a larger latency cost, so we report every shape as well as aggregate results. Against vLLM's fixed invariant W4A4 configuration, FlashInfer's invariant implementation is faster in geometric mean in each regime.
+![Autotuned NVFP4 GEMM latency across all eight N/K shapes and fourteen token counts, comparing FI batch invariant, regular CuTe DSL, and fixed vLLM BI W4A4.](/assets/imgs/rl-ready-kernels/nvfp4-autotuned.svg)
 
-The table reports baseline latency divided by FlashInfer invariant latency. Above 1x favors FlashInfer invariant. Each geometric mean gives equal weight to the measured shape/M pairs in its regime.
+*Autotuned FlashInfer NVFP4 paths and fixed vLLM BI W4A4 on NVIDIA Vera Rubin NVL4. Both operands are prequantized and output is BF16. Lower latency is better. Dashed vertical lines mark M=16 and M=1024.*
 
-| FlashInfer selection | Comparator | Batch Invariant | Decode | Middle | Prefill |
-| --- | --- | --- | ---: | ---: | ---: |
-| Untuned | Untuned regular CuTe DSL | No | 0.92x | 0.96x | 1.02x |
-| Untuned | Fixed vLLM invariant W4A4 | Yes | 2.67x | 2.27x | 1.82x |
-| Autotuned | Autotuned regular CuTe DSL | No | 0.89x | 0.96x | 1.01x |
-| Autotuned | Fixed vLLM invariant W4A4 | Yes | 2.73x | 2.30x | 1.84x |
-
-For the autotuned comparison with regular CuTe DSL, those ratios correspond to approximately 12% higher decode latency and 4% higher middle-regime latency in geometric mean, with approximately equal prefill latency. The curves show where those costs occur. These measurements describe GEMMs; they do not measure end-to-end RL throughput.
-
-
-![Autotuned NVFP4 GEMM latency across all eight N/K shapes and fourteen token counts, comparing FlashInfer invariant, regular CuTe DSL, and fixed vLLM invariant W4A4.](/assets/imgs/rl-ready-kernels/nvfp4-autotuned.svg)
-
-*Autotuned FlashInfer NVFP4 paths and fixed vLLM invariant W4A4 on NVIDIA Vera Rubin NVL4. Both operands are prequantized and output is BF16. Lower latency is better. Dashed vertical lines mark M=16 and M=1024.*
-
+</details>
 
 <details markdown="1">
   <summary>Untuned NVFP4 curves for all eight shapes</summary>
 
 ![Untuned NVFP4 GEMM latency for the same eight shapes and fourteen token counts.](/assets/imgs/rl-ready-kernels/nvfp4-primary.svg)
 
-*Untuned FlashInfer invariant and regular CuTe DSL paths, with the same fixed vLLM invariant W4A4 comparator. The raw samples and absolute latency table are retained in the reproducer artifacts.*
+*Untuned FI batch invariant and regular CuTe DSL paths, with the same fixed vLLM BI W4A4 comparator. The raw samples and absolute latency table are retained in the reproducer artifacts.*
 
 </details>
-
-### Split-K diagnostic
-
-What would we lose if we gave up splitting? We evaluate eight shapes inside the split region, with C ranging from 2 to 32, at M=1, 16, 128, 1024, and 8192. These narrow-output shapes are a separate study from the primary transformer matrix.
-
-The ablation forces C=1 through FlashInfer's internal class entry point and uses its unchanged dispatcher and autotuner for that class. Both sides receive identical operands and use the same MMA primitive and epilogue. For NVFP4, both sides retain the split region's 64-element primitive; the ablation does not also switch to the ordinary unsplit region's wider instruction. Tuning profiles the same top-configuration policy separately for each class.
-
-Removing chunking changes the reduction contract, so the two sides need not return identical bits. Each side must independently pass batch-invariance checks, and its tuned result must equal its own default result bit for bit.
-
-| Format | Selection | Batch Invariant | Decode: M=1,16 | Middle: M=128 | Prefill: M=1024,8192 |
-| --- | --- | --- | ---: | ---: | ---: |
-| BF16 | Untuned | Yes | 2.15x | 1.94x | 1.10x |
-| BF16 | Autotuned | Yes | 2.15x | 2.34x | 1.11x |
-| NVFP4 | Untuned | Yes | 1.26x | 1.46x | 0.72x |
-| NVFP4 | Autotuned | Yes | 1.45x | 1.59x | 1.08x |
-
-The ratio is forced-unsplit latency divided by the policy-class latency. Above 1x favors the chunked class. With autotuning, removing chunking costs 2.15x latency in BF16 decode and 1.45x in NVFP4 decode in geometric mean over these selected shapes.
-
-The tradeoff is visible at prefill. Some shapes run faster without chunks, and the untuned NVFP4 chunked path has a substantial aggregate prefill cost. Autotuning improves that aggregate, but it does not make every chunked case faster. At N=128, K=65536, for example, tuned chunking provides about 5.92x BF16 speedup at M=1, while its ratio falls to 0.74x at M=8192. A fixed chunk contract creates useful decode parallelism and also constrains the arithmetic that large batches must retain.
-
-
-![Untuned and autotuned BF16 and NVFP4 split-region ablations, with every shape/M ratio labeled. Some prefill cases favor the forced-unsplit class.](/assets/imgs/rl-ready-kernels/splitk-ablation.svg)
-
-*The cost of giving up chunking at a fixed MMA primitive. Each cell compares independently batch-invariant numerical classes. Both selection modes and every measured shape are shown; absolute latencies and samples are archived.*
-
-
-## From consistent GEMMs to consistent RL
-
-GEMMs account for a large part of a model's forward pass, but phase consistency spans the rest of that pass too. Attention must preserve a token's computation across prefill, decode, and KV partitioning. Normalization and log-probability reductions need stable numerical contracts. Quantization scales, fused activations, and tensor-parallel collectives must agree between the trainer and rollout engine. Sampling also needs request-level random-state semantics when reproducible responses are required.
-
-FlashInfer's current-main work extends the numerical-contract approach beyond the GEMMs introduced in v0.7.4. Its batch-invariant attention classes define fixed absolute KV tiles and chunks shared by supported prefill and decode wrappers. Quantization and sampling/log-probability APIs have their own specified chains and conformance checks. These features have individual input and execution constraints, documented alongside their APIs.
-
-For an RL framework, the integration task is to use the same contract for each matching forward computation. A kernel-level guarantee does not establish deterministic training updates or prove that two complete model implementations agree. It provides a stable building block for doing that work.
-
-The engineering direction is to make numerical behavior an explicit part of the API. Once the dataflow is fixed and checked, performance work can explore how to execute it efficiently—from one-token decode to large prefill—while preserving the computation that the RL pipeline relies on.
-
-## Reproduce the measurements
-
-The [reproduction bundle](/assets/data/rl-ready-kernels/flashinfer-rl-study.tar.gz) contains the exact measured harness snapshots, backend adapters, source and environment manifests, selected tuning configurations, generated-code provenance, correctness checks, raw per-iteration timing samples, absolute-latency CSVs, and figure scripts. It also includes the N/K class-policy map and both modes of the split-K ablation. The [archive checksum](/assets/data/rl-ready-kernels/SHA256SUMS) and the bundle's internal file checksums allow the artifacts to be verified before rerunning them.
-
-The guide inside the bundle explains source provisioning, idle-device admission, exact-snapshot replay, and figure regeneration. Kernel timings describe the stated implementations and shapes on NVIDIA Vera Rubin NVL4; they do not imply end-to-end RL speedups.

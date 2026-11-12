@@ -1,97 +1,104 @@
 # Measured GEMM results
 
-Speedup is baseline latency / FlashInfer invariant latency; above 1 favors FlashInfer invariant.
+Primary comparison ratios are comparator latency / FI batch invariant latency; above 1 favors FI batch invariant.
+The split-K sections instead show performance retained under a hypothetical no-split policy, using measured kernels. Values below 1 show a loss.
 
-The FlashInfer invariant control is batch invariant (Yes) in every comparison. The column below describes the comparator's selected mode within the validated study matrix. Regular modes marked No do not provide the requested batch-invariance contract. The forced-unsplit ablation is independently batch invariant, with a different numerical class.
+Both classes in the split-K study are independently batch invariant, with different numerical contracts.
 
 ## bf16-untuned-v2
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FlashInfer regular CUTLASS | No | 1.69x | 1.46x | 2.51x |
-| PyTorch Inductor/Triton invariant option | Yes | 9.03x | 11.49x | 20.89x |
+| FI CUTLASS [non-BI] | No | 1.69× | 1.46× | 2.51× |
+| PyTorch Inductor/Triton [BI] | Yes | 9.03× | 11.49× | 20.89× |
 
 ## bf16-autotuned
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FlashInfer regular CUTLASS | No | 1.15x | 1.21x | 1.29x |
-| PyTorch Inductor/Triton invariant option | Yes | 1.31x | 1.60x | 1.59x |
+| FI CUTLASS [non-BI] | No | 1.15× | 1.21× | 1.29× |
+| PyTorch Inductor/Triton [BI] | Yes | 1.31× | 1.60× | 1.59× |
 
 ## bf16-extra-untuned
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FlashInfer regular BF16 CuTe DSL | No | 0.82x | N/A | N/A |
-| vLLM persistent Triton invariant | Yes | 6.07x | 4.31x | 3.43x |
+| FI CuTe DSL [non-BI; decode only] | No | 0.82× | N/A | N/A |
+| vLLM Triton [BI] | Yes | 6.07× | 4.31× | 3.43× |
 
 ## bf16-extra-autotuned
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FlashInfer regular BF16 CuTe DSL | No | 0.76x | N/A | N/A |
-| vLLM persistent Triton invariant | Yes | 6.06x | 4.40x | 3.46x |
+| FI CuTe DSL [non-BI; decode only] | No | 0.76× | N/A | N/A |
+| vLLM Triton [BI] | Yes | 6.06× | 4.40× | 3.46× |
 
 ## bf16-libraries-untuned
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FlashInfer cuDNN | No | 0.94x | 0.97x | 1.00x |
-| FlashInfer cuTile | No | 3.05x | 2.20x | 2.64x |
+| FI cuDNN [non-BI] | No | 0.94× | 0.97× | 1.00× |
 
 ## bf16-libraries-autotuned
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FlashInfer cuDNN | No | 0.94x | 0.99x | 1.00x |
-| FlashInfer cuTile | No | 1.82x | 1.71x | 1.39x |
+| FI cuDNN [non-BI] | No | 0.94× | 0.99× | 1.00× |
 
 ## bf16-deepgemm-untuned
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| DeepGEMM deterministic BF16 | Yes | 1.21x | 1.18x | 0.98x |
+| DeepGEMM BF16 [BI] | Yes | 1.21× | 1.18× | 0.98× |
 
 ## bf16-deepgemm-autotuned
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| DeepGEMM deterministic BF16 | Yes | 1.22x | 1.21x | 0.99x |
+| DeepGEMM BF16 [BI] | Yes | 1.22× | 1.21× | 0.99× |
 
 ## nvfp4-primary
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FlashInfer regular CuTe DSL | No | 0.92x | 0.96x | 1.02x |
-| vLLM CUTLASS invariant W4A4 | Yes | 2.67x | 2.27x | 1.82x |
+| FI CuTe DSL [non-BI] | No | 0.92× | 0.96× | 1.02× |
+| vLLM BI W4A4 | Yes | 2.67× | 2.27× | 1.82× |
 
 ## nvfp4-autotuned
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FlashInfer regular CuTe DSL | No | 0.89x | 0.96x | 1.01x |
-| vLLM CUTLASS invariant W4A4 | Yes | 2.73x | 2.30x | 1.84x |
+| FI CuTe DSL [non-BI] | No | 0.89× | 0.96× | 1.01× |
+| vLLM BI W4A4 | Yes | 2.73× | 2.30× | 1.84× |
 
 ## bf16-splitk-ablation-untuned
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+**Hypothetical no-split policy:** policy-class latency / forced-unsplit latency.
+
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FI forced unsplit (different numerical class) | Yes | 2.15x | 1.94x | 1.10x |
+| FI forced unsplit (hypothetical policy) | Yes | 0.47× | 0.52× | 0.91× |
 
 ## bf16-splitk-ablation-autotuned
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+**Hypothetical no-split policy:** policy-class latency / forced-unsplit latency.
+
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FI forced unsplit (different numerical class) | Yes | 2.15x | 2.34x | 1.11x |
+| FI forced unsplit (hypothetical policy) | Yes | 0.47× | 0.43× | 0.90× |
 
 ## nvfp4-splitk-ablation-untuned
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+**Hypothetical no-split policy:** policy-class latency / forced-unsplit latency.
+
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FI forced unsplit (different numerical class) | Yes | 1.26x | 1.46x | 0.72x |
+| FI forced unsplit (hypothetical policy) | Yes | 0.79× | 0.68× | 1.39× |
 
 ## nvfp4-splitk-ablation-autotuned
 
-| Baseline | Batch Invariant | Decode geometric mean | Middle geometric mean | Prefill geometric mean |
+**Hypothetical no-split policy:** policy-class latency / forced-unsplit latency.
+
+| Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FI forced unsplit (different numerical class) | Yes | 1.45x | 1.59x | 1.08x |
+| FI forced unsplit (hypothetical policy) | Yes | 0.69× | 0.63× | 0.93× |

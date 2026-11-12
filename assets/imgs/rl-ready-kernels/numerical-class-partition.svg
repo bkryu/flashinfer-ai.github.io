@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="933.84pt" height="584.64pt" viewBox="0 0 933.84 584.64" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.2, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 584.64
+L 933.84 584.64
+L 933.84 0
+L 0 0
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 79.308 479.4912
+L 522.792 479.4912
+L 522.792 130.2912
+L 79.308 130.2912
+z
+" clip-path="url(#p58b7f3e204)" style="fill: #e5edfc; stroke: #c1cbb9; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 79.308 381.7152
+L 79.308 130.2912
+L 327.24 130.2912
+L 327.24 200.1312
+z
+" clip-path="url(#p58b7f3e204)" style="fill: #fff0d7"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 75.326376 479.4912
+Q 306.290538 479.4912 535.801255 479.4912
+" clip-path="url(#p58b7f3e204)" style="fill: none; stroke: #24312b; stroke-width: 1.3; stroke-linecap: round"/>
+    <path d="M 530.601255 476.8912
+L 535.801255 479.4912
+L 530.601255 482.0912
+z
+" clip-path="url(#p58b7f3e204)" style="fill: #24312b; stroke: #24312b; stroke-width: 1.3; stroke-linecap: round"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 79.308 479.98125
+Q 79.308 297.906232 79.308 117.284657
+" clip-path="url(#p58b7f3e204)" style="fill: none; stroke: #24312b; stroke-width: 1.3; stroke-linecap: round"/>
+    <path d="M 76.708 122.484657
+L 79.308 117.284657
+L 81.908 122.484657
+z
+" clip-path="url(#p58b7f3e204)" style="fill: #24312b; stroke: #24312b; stroke-width: 1.3; stroke-linecap: round"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 270.862871 161.34664
+Q 421.524586 177.782464 570.741429 194.060665
+" clip-path="url(#p58b7f3e204)" style="fill: none; stroke: #a56300; stroke-width: 1.3; stroke-linecap: round"/>
+    <path d="M 565.854061 190.912072
+L 570.741429 194.060665
+L 565.290134 196.081404
+z
+" clip-path="url(#p58b7f3e204)" style="fill: #a56300; stroke: #a56300; stroke-width: 1.3; stroke-linecap: round"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 434.992945 323.529004
+Q 503.587338 318.509902 570.732161 313.596866
+" clip-path="url(#p58b7f3e204)" style="fill: none; stroke: #2563eb; stroke-width: 1.3; stroke-linecap: round"/>
+    <path d="M 565.356289 311.383272
+L 570.732161 313.596866
+L 565.735763 316.569407
+z
+" clip-path="url(#p58b7f3e204)" style="fill: #2563eb; stroke: #2563eb; stroke-width: 1.3; stroke-linecap: round"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 578.664 240.6384
+L 858.024 240.6384
+Q 862.2144 240.6384 862.2144 236.448
+L 862.2144 156.132
+Q 862.2144 151.9416 858.024 151.9416
+L 578.664 151.9416
+Q 574.4736 151.9416 574.4736 156.132
+L 574.4736 236.448
+Q 574.4736 240.6384 578.664 240.6384
+z
+" clip-path="url(#p58b7f3e204)" style="fill: #fff0d7; stroke: #a56300; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 578.664 362.8584
+L 858.024 362.8584
+Q 862.2144 362.8584 862.2144 358.668
+L 862.2144 278.352
+Q 862.2144 274.1616 858.024 274.1616
+L 578.664 274.1616
+Q 574.4736 274.1616 574.4736 278.352
+L 574.4736 358.668
+Q 574.4736 362.8584 578.664 362.8584
+z
+" clip-path="url(#p58b7f3e204)" style="fill: #e5edfc; stroke: #2563eb; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 79.308 566.0928
+L 858.024 566.0928
+Q 862.2144 566.0928 862.2144 561.9024
+L 862.2144 526.9824
+Q 862.2144 522.792 858.024 522.792
+L 79.308 522.792
+Q 75.1176 522.792 75.1176 526.9824
+L 75.1176 561.9024
+Q 75.1176 566.0928 79.308 566.0928
+z
+" clip-path="url(#p58b7f3e204)" style="fill: #edf5e8; stroke: #cbdac0; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_1">
+    <path d="M 79.308 381.7152
+L 327.24 200.1312
+L 327.24 130.2912
+" clip-path="url(#p58b7f3e204)" style="fill: none; stroke-dasharray: 5.55,2.4; stroke-dashoffset: 0; stroke: #a56300; stroke-width: 1.5"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 19px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #24312b" x="37.404" y="39.4992" transform="rotate(-0 37.404 39.4992)">Choose the numerical class from the fixed weight shape</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 12.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #617069" x="37.404" y="70.2288" transform="rotate(-0 37.404 70.2288)">Schematic N/K partition for one format and architecture; M is not a class-selection axis.</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #24312b" x="301.05" y="512.316" transform="rotate(-0 301.05 512.316)">N · output columns →</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 12px; font-family: 'DejaVu Sans'; fill: #24312b" transform="translate(40.521656 370.942763) rotate(-90)">K · reduction length →</text>
+   </g>
+   <g id="text_5">
+    <text style="font-weight: 700; font-size: 13.5px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #a56300" x="184.068" y="183.3696" transform="rotate(-0 184.068 183.3696)">Ordered chunk fold</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #a56300" x="184.068" y="213.4008" transform="rotate(-0 184.068 213.4008)">C(N, K, format) &gt; 1</text>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 11.5px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #617069" x="184.068" y="242.0352" transform="rotate(-0 184.068 242.0352)">narrow N, long K</text>
+   </g>
+   <g id="text_8">
+    <text style="font-weight: 700; font-size: 13.5px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #2563eb" x="351.684" y="400.572" transform="rotate(-0 351.684 400.572)">Uninterrupted K fold</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #2563eb" x="351.684" y="430.6032" transform="rotate(-0 351.684 430.6032)">C = 1</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 12px; font-family: 'DejaVu Sans'; fill: #a56300" transform="translate(665.844938 190.90125)">Split-class weight</text>
+    <text style="font-size: 12px; font-family: 'DejaVu Sans'; fill: #a56300" transform="translate(598.852125 208.30125)">Same chunks + ordered fold at every M</text>
+   </g>
+   <g id="text_11">
+    <text style="font-size: 12px; font-family: 'DejaVu Sans'; fill: #2563eb" transform="translate(658.334625 313.12125)">Unsplit-class weight</text>
+    <text style="font-size: 12px; font-family: 'DejaVu Sans'; fill: #2563eb" transform="translate(610.958063 330.52125)">Same uninterrupted fold at every M</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #24312b" x="718.344" y="395.6832" transform="rotate(-0 718.344 395.6832)">Decode  →  middle  →  prefill</text>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 11.5px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #617069" x="718.344" y="426.4128" transform="rotate(-0 718.344 426.4128)">Tune tiles, scheduling, and placement</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 11.5px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #617069" x="718.344" y="452.952" transform="rotate(-0 718.344 452.952)">within the selected numerical class.</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #365c20" x="468.666" y="547.477713" transform="rotate(-0 468.666 547.477713)">Schematic boundary. The exact policy also enforces granule alignment, chunk length, and traffic limits.</text>
+   </g>
+   <g id="PathCollection_1">
+    <defs>
+     <path id="C0_0_3dad1e6abc" d="M 0 4.330127
+C 1.148363 4.330127 2.249847 3.873878 3.061862 3.061862
+C 3.873878 2.249847 4.330127 1.148363 4.330127 -0
+C 4.330127 -1.148363 3.873878 -2.249847 3.061862 -3.061862
+C 2.249847 -3.873878 1.148363 -4.330127 0 -4.330127
+C -1.148363 -4.330127 -2.249847 -3.873878 -3.061862 -3.061862
+C -3.873878 -2.249847 -4.330127 -1.148363 -4.330127 0
+C -4.330127 1.148363 -3.873878 2.249847 -3.061862 3.061862
+C -2.249847 3.873878 -1.148363 4.330127 0 4.330127
+z
+"/>
+    </defs>
+    <g clip-path="url(#p58b7f3e204)">
+     <use xlink:href="#C0_0_3dad1e6abc" x="260.892" y="161.0208" style="fill: #a56300; stroke: #a56300"/>
+    </g>
+    <g clip-path="url(#p58b7f3e204)">
+     <use xlink:href="#C0_0_3dad1e6abc" x="425.016" y="323.748" style="fill: #2563eb; stroke: #2563eb"/>
+    </g>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p58b7f3e204">
+   <rect x="12.96" y="12.96" width="907.92" height="558.72"/>
+  </clipPath>
+ </defs>
+</svg>

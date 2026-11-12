@@ -1,0 +1,61 @@
+kind,dtype,study,dataset,backend,batch_invariant,regime,ratio,cases,definition
+competitor,bf16,untuned,bf16-untuned-v2,torch_inductor_bi_triton,Yes,decode,9.032171736735865,40,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-extra-untuned,vllm_triton_bi,Yes,decode,6.072707410697228,40,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-deepgemm-untuned,deepgemm_bf16_bi,Yes,decode,1.2146268454350844,40,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-untuned-v2,flashinfer_cutlass,No,decode,1.6883677513934232,40,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-libraries-untuned,flashinfer_cudnn,No,decode,0.9363357139841222,40,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-extra-untuned,flashinfer_bf16_cute_dsl,No,decode,0.8164462394557687,40,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-untuned-v2,torch_inductor_bi_triton,Yes,middle,11.486552302498335,40,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-extra-untuned,vllm_triton_bi,Yes,middle,4.307084793066696,40,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-deepgemm-untuned,deepgemm_bf16_bi,Yes,middle,1.1843274884591566,40,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-untuned-v2,flashinfer_cutlass,No,middle,1.4643644340518622,40,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-libraries-untuned,flashinfer_cudnn,No,middle,0.9713813911012815,40,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-extra-untuned,flashinfer_bf16_cute_dsl,No,middle,,0,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-untuned-v2,torch_inductor_bi_triton,Yes,prefill,20.89065109762116,32,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-extra-untuned,vllm_triton_bi,Yes,prefill,3.4252087578186416,32,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-deepgemm-untuned,deepgemm_bf16_bi,Yes,prefill,0.9772289873888098,32,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-untuned-v2,flashinfer_cutlass,No,prefill,2.5087484258723696,32,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-libraries-untuned,flashinfer_cudnn,No,prefill,0.9957283177697486,32,comparator latency / FI batch invariant latency
+competitor,bf16,untuned,bf16-extra-untuned,flashinfer_bf16_cute_dsl,No,prefill,,0,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-autotuned,torch_inductor_bi_triton,Yes,decode,1.3149314004735104,40,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-extra-autotuned,vllm_triton_bi,Yes,decode,6.060827069032283,40,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-deepgemm-autotuned,deepgemm_bf16_bi,Yes,decode,1.222116319588052,40,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-autotuned,flashinfer_cutlass,No,decode,1.1460465137928708,40,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-libraries-autotuned,flashinfer_cudnn,No,decode,0.9425643177738063,40,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-extra-autotuned,flashinfer_bf16_cute_dsl,No,decode,0.7559589445359092,40,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-autotuned,torch_inductor_bi_triton,Yes,middle,1.5996477715831845,40,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-extra-autotuned,vllm_triton_bi,Yes,middle,4.399608424822544,40,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-deepgemm-autotuned,deepgemm_bf16_bi,Yes,middle,1.2145940698163007,40,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-autotuned,flashinfer_cutlass,No,middle,1.2104976338155509,40,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-libraries-autotuned,flashinfer_cudnn,No,middle,0.9912430799786478,40,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-extra-autotuned,flashinfer_bf16_cute_dsl,No,middle,,0,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-autotuned,torch_inductor_bi_triton,Yes,prefill,1.587903756459447,32,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-extra-autotuned,vllm_triton_bi,Yes,prefill,3.456569852308753,32,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-deepgemm-autotuned,deepgemm_bf16_bi,Yes,prefill,0.9923435870481698,32,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-autotuned,flashinfer_cutlass,No,prefill,1.293737169307281,32,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-libraries-autotuned,flashinfer_cudnn,No,prefill,1.00192217659067,32,comparator latency / FI batch invariant latency
+competitor,bf16,autotuned,bf16-extra-autotuned,flashinfer_bf16_cute_dsl,No,prefill,,0,comparator latency / FI batch invariant latency
+competitor,nvfp4,untuned,nvfp4-primary,vllm_cutlass_bi_w4a4,Yes,decode,2.6706351836659588,40,comparator latency / FI batch invariant latency
+competitor,nvfp4,untuned,nvfp4-primary,flashinfer_cute_dsl,No,decode,0.9243574812158062,40,comparator latency / FI batch invariant latency
+competitor,nvfp4,untuned,nvfp4-primary,vllm_cutlass_bi_w4a4,Yes,middle,2.272939414073377,40,comparator latency / FI batch invariant latency
+competitor,nvfp4,untuned,nvfp4-primary,flashinfer_cute_dsl,No,middle,0.9642719473778192,40,comparator latency / FI batch invariant latency
+competitor,nvfp4,untuned,nvfp4-primary,vllm_cutlass_bi_w4a4,Yes,prefill,1.8245081946788335,32,comparator latency / FI batch invariant latency
+competitor,nvfp4,untuned,nvfp4-primary,flashinfer_cute_dsl,No,prefill,1.0160836548238326,32,comparator latency / FI batch invariant latency
+competitor,nvfp4,autotuned,nvfp4-autotuned,vllm_cutlass_bi_w4a4,Yes,decode,2.730196570799381,40,comparator latency / FI batch invariant latency
+competitor,nvfp4,autotuned,nvfp4-autotuned,flashinfer_cute_dsl,No,decode,0.8914610346528046,40,comparator latency / FI batch invariant latency
+competitor,nvfp4,autotuned,nvfp4-autotuned,vllm_cutlass_bi_w4a4,Yes,middle,2.3035445910096324,40,comparator latency / FI batch invariant latency
+competitor,nvfp4,autotuned,nvfp4-autotuned,flashinfer_cute_dsl,No,middle,0.9569634340708065,40,comparator latency / FI batch invariant latency
+competitor,nvfp4,autotuned,nvfp4-autotuned,vllm_cutlass_bi_w4a4,Yes,prefill,1.8353645319802965,32,comparator latency / FI batch invariant latency
+competitor,nvfp4,autotuned,nvfp4-autotuned,flashinfer_cute_dsl,No,prefill,1.012836050058034,32,comparator latency / FI batch invariant latency
+splitk_retention,bf16,untuned,bf16-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,decode,0.46587903241312306,16,policy-class latency / forced-unsplit latency
+splitk_retention,nvfp4,untuned,nvfp4-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,decode,0.7939932412442929,16,policy-class latency / forced-unsplit latency
+splitk_retention,bf16,untuned,bf16-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,middle,0.5157315030812958,8,policy-class latency / forced-unsplit latency
+splitk_retention,nvfp4,untuned,nvfp4-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,middle,0.6829875324331902,8,policy-class latency / forced-unsplit latency
+splitk_retention,bf16,untuned,bf16-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,prefill,0.9054701676170961,16,policy-class latency / forced-unsplit latency
+splitk_retention,nvfp4,untuned,nvfp4-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,prefill,1.393527322033791,16,policy-class latency / forced-unsplit latency
+splitk_retention,bf16,autotuned,bf16-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,decode,0.4653847468662793,16,policy-class latency / forced-unsplit latency
+splitk_retention,nvfp4,autotuned,nvfp4-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,decode,0.6918865413040415,16,policy-class latency / forced-unsplit latency
+splitk_retention,bf16,autotuned,bf16-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,middle,0.42815574171834087,8,policy-class latency / forced-unsplit latency
+splitk_retention,nvfp4,autotuned,nvfp4-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,middle,0.6278588459029601,8,policy-class latency / forced-unsplit latency
+splitk_retention,bf16,autotuned,bf16-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,prefill,0.8983016107513359,16,policy-class latency / forced-unsplit latency
+splitk_retention,nvfp4,autotuned,nvfp4-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,prefill,0.9260833025480478,16,policy-class latency / forced-unsplit latency
