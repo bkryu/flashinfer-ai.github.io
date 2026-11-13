@@ -73,32 +73,32 @@ Both classes in the split-K study are independently batch invariant, with differ
 
 ## bf16-splitk-ablation-untuned
 
-**Hypothetical no-split policy:** policy-class latency / forced-unsplit latency.
+**Hypothetical no-split policy:** policy-class latency / forced-unsplit latency. Geometric means use the seven displayed shapes.
 
 | Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FI forced unsplit (hypothetical policy) | Yes | 0.47× | 0.52× | 0.91× |
+| FI forced unsplit (hypothetical policy) | Yes | 0.54× | 0.59× | 0.91× |
 
 ## bf16-splitk-ablation-autotuned
 
-**Hypothetical no-split policy:** policy-class latency / forced-unsplit latency.
+**Hypothetical no-split policy:** policy-class latency / forced-unsplit latency. Geometric means use the seven displayed shapes.
 
 | Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FI forced unsplit (hypothetical policy) | Yes | 0.47× | 0.43× | 0.90× |
+| FI forced unsplit (hypothetical policy) | Yes | 0.54× | 0.47× | 0.91× |
 
 ## nvfp4-splitk-ablation-untuned
 
-**Hypothetical no-split policy:** policy-class latency / forced-unsplit latency.
+**Hypothetical no-split policy:** policy-class latency / forced-unsplit latency. Geometric means use the seven displayed shapes.
 
 | Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FI forced unsplit (hypothetical policy) | Yes | 0.79× | 0.68× | 1.39× |
+| FI forced unsplit (hypothetical policy) | Yes | 0.91× | 0.77× | 1.47× |
 
 ## nvfp4-splitk-ablation-autotuned
 
-**Hypothetical no-split policy:** policy-class latency / forced-unsplit latency.
+**Hypothetical no-split policy:** policy-class latency / forced-unsplit latency. Geometric means use the seven displayed shapes.
 
 | Comparator | Batch Invariant | Decode | Middle | Prefill |
 | --- | --- | ---: | ---: | ---: |
-| FI forced unsplit (hypothetical policy) | Yes | 0.69× | 0.63× | 0.93× |
+| FI forced unsplit (hypothetical policy) | Yes | 0.78× | 0.70× | 0.92× |

@@ -40,6 +40,7 @@ REGIMES = ("decode", "middle", "prefill")
 REGIME_TITLES = ("Decode · M ≤ 16", "Middle · 16 < M < 1024", "Prefill · M ≥ 1024")
 MODES = ("untuned", "autotuned")
 DISPLAY_EXCLUSIONS = {"flashinfer_cutile"}
+SPLITK_SHAPE_EXCLUSIONS = {(128, 65536)}
 PAIRS = {
     "bf16": [
         ("PyTorch Inductor/Triton", "torch_inductor_bi_triton", "bf16-untuned-v2", "bf16-autotuned", ""),
@@ -166,7 +167,8 @@ def splitk_figures(data, rows, out, display_rows):
                 cells.append({"dtype": dtype, "study": mode, "dataset": name, "N": n, "K": k, "M": m,
                     "policy_latency_us": policy, "forced_unsplit_latency_us": unsplit,
                     "retained_performance_without_splitk": retained,
-                    "performance_loss_percent": 100 * (1 - retained)})
+                    "performance_loss_percent": 100 * (1 - retained),
+                    "included_in_displayed_study": "No" if (n, k) in SPLITK_SHAPE_EXCLUSIONS else "Yes"})
             values_by_dataset[name] = selected
     fig, axes = plt.subplots(2, 3, figsize=(13, 6.5), sharey=True)
     for row, mode in enumerate(MODES):
@@ -175,16 +177,19 @@ def splitk_figures(data, rows, out, display_rows):
             for i, dtype in enumerate(("bf16", "nvfp4")):
                 name = f"{dtype}-splitk-ablation-{mode}"
                 stats = data[name]["speedups"]["flashinfer_unsplit_ablation"][regime]
-                retained = 1 / stats["geomean_speedup"]
-                values = [v for (_, _, m), v in values_by_dataset[name].items()
-                          if (m <= 16 if regime == "decode" else 16 < m < 1024 if regime == "middle" else m >= 1024)]
-                assert math.isclose(math.exp(statistics.mean(map(math.log, values))), retained, rel_tol=1e-12)
+                in_regime = lambda m: (m <= 16 if regime == "decode" else 16 < m < 1024 if regime == "middle" else m >= 1024)
+                original_values = [v for (_, _, m), v in values_by_dataset[name].items() if in_regime(m)]
+                assert math.isclose(math.exp(statistics.mean(map(math.log, original_values))),
+                                    1 / stats["geomean_speedup"], rel_tol=1e-12)
+                values = [v for (n, k, m), v in values_by_dataset[name].items()
+                          if (n, k) not in SPLITK_SHAPE_EXCLUSIONS and in_regime(m)]
+                retained = math.exp(statistics.mean(map(math.log, values)))
                 axis.barh(i, retained, height=.54, color="#bb5b4e" if retained < 1 else BI_COLOR)
                 axis.text(retained + .035, i, f"{retained:.2f}×", va="center", fontsize=12, weight="bold",
                           bbox={"facecolor": "white", "edgecolor": "none", "pad": .5, "alpha": .95})
                 display_rows.append({"kind": "splitk_retention", "dtype": dtype, "study": mode,
                     "dataset": name, "backend": "flashinfer_unsplit_ablation", "batch_invariant": "Yes",
-                    "regime": regime, "ratio": retained, "cases": stats["cases"],
+                    "regime": regime, "ratio": retained, "cases": len(values),
                     "definition": "policy-class latency / forced-unsplit latency"})
             axis.axvline(1, linestyle="--", color="#343e37", lw=1)
             axis.set_xlim(0, 1.65)
@@ -200,21 +205,23 @@ def splitk_figures(data, rows, out, display_rows):
              ha="center", fontsize=12)
     fig.text(.55, .11, "0.5× = half the performance · 1× = no change · >1× = faster without splitting",
              ha="center", fontsize=11.5)
-    fig.text(.03, .03, "Measured ablation of a hypothetical policy on eight split-region shapes; both classes are independently batch invariant.\n"
+    fig.text(.03, .03, "Measured ablation of a hypothetical policy on seven displayed split-region shapes; each class is independently batch invariant.\n"
              "Same operands, MMA primitive, and epilogue; each class uses its own default or autotuned configuration.",
              fontsize=10, color=MUTED, linespacing=1.5)
     fig.subplots_adjust(left=.16, right=.97, top=.80, bottom=.24, wspace=.18, hspace=.65)
     save(fig, out, "splitk-retained-performance")
 
     fig, axes = plt.subplots(2, 2, figsize=(15, 10.6))
-    limit = max(3, math.ceil(max(abs(math.log2(cell["retained_performance_without_splitk"])) for cell in cells)))
+    limit = max(3, math.ceil(max(abs(math.log2(cell["retained_performance_without_splitk"]))
+                               for cell in cells if cell["included_in_displayed_study"] == "Yes")))
     norm = TwoSlopeNorm(vmin=-limit, vcenter=0, vmax=limit)
     for row, mode in enumerate(MODES):
         for col, dtype in enumerate(("bf16", "nvfp4")):
             axis = axes[row, col]
             name = f"{dtype}-splitk-ablation-{mode}"
             manifest = data[name]["manifest"]
-            shapes = [tuple(shape) for shape in manifest["shapes_nk"]]
+            shapes = [tuple(shape) for shape in manifest["shapes_nk"]
+                      if tuple(shape) not in SPLITK_SHAPE_EXCLUSIONS]
             ms = manifest["tokens"]
             values = np.array([[values_by_dataset[name][n, k, m] for m in ms] for n, k in shapes])
             image = axis.imshow(np.log2(values), cmap="RdYlGn", norm=norm, aspect="auto")
@@ -237,7 +244,7 @@ def splitk_figures(data, rows, out, display_rows):
     fig.text(.5, .922, "Policy latency / forced-unsplit latency · <1× means a loss · >1× means an improvement",
              ha="center", fontsize=12)
     fig.text(.03, .035, "Measured kernels for a hypothetical policy. Same primitive and epilogue; each reduction class is independently batch invariant.\n"
-             "All measured shape/M pairs are shown. Values and absolute latencies are exported in splitk-retention-cells.csv.",
+             "Seven shapes shown; the complete eight-shape sweep remains in splitk-retention-cells.csv with display-selection flags.",
              fontsize=10.5, color=MUTED, linespacing=1.5)
     save(fig, out, "splitk-ablation")
     write_csv(out / "splitk-retention-cells.csv", cells)
@@ -321,6 +328,8 @@ def main():
         "display_exclusions": sorted(DISPLAY_EXCLUSIONS),
         "exclusion_scope": "blog presentation only; all original backend measurements remain in the frozen analysis and archive",
         "splitk_scope": "hypothetical no-split policy evaluated using measured kernels",
+        "splitk_display_excluded_shapes": sorted(SPLITK_SHAPE_EXCLUSIONS),
+        "splitk_selection_scope": "the same seven shapes enter the heatmap and aggregate bars; all eight measured shapes are retained in the cell CSV with inclusion flags",
     }
     (args.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     shutil.copy2(__file__, args.out / "plot_script.py")

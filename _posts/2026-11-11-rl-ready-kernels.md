@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "FlashInfer for RL: Minimizing the Performance Cost of Batch Invariance"
+title: "FlashInfer for RL: Minimizing the Performance Cost of Batch Invariance (part 1)"
 date: 2026-11-11 00:00:00 +0000
 author: "Brian K. Ryu"
 body_class: technical-blog
@@ -11,13 +11,15 @@ excerpt: "Minimizing the performance cost of batch-invariant GEMMs for RL throug
 <!-- Review draft. Results come from the complete, audited Vera Rubin NVL4
      study. Copy this post and its referenced assets together for publication. -->
 
-Reinforcement learning repeatedly evaluates the same policy under different execution conditions. A rollout engine generates responses a few tokens at a time, mixing requests as they arrive and finish. A trainer later processes those responses in larger batches to recompute log probabilities and form updates. For identical weights and token histories, we want both sides to assign the same probabilities. Optimized implementations can still produce different numbers.
+Reinforcement learning (RL) for language models connects generation and training in a feedback loop. A policy generates responses, a trainer uses those responses to improve the policy, and the cycle repeats. Both stages evaluate the probabilities assigned to the sampled tokens, making numerical agreement between them part of the learning process.
+
+Each stage is optimized for a different workload. A rollout engine generates responses a few tokens at a time, mixing requests as they arrive and finish. A trainer later processes those responses in larger batches to recompute log probabilities and form updates. For identical weights and token histories, we want both sides to assign the same probabilities. Those different execution choices can cause the numbers to disagree.
 
 One source of that mismatch is below the model: GPU kernels adapt their arithmetic to the workload. A matrix multiplication can use one reduction at decode and another at prefill. Floating-point addition is not associative, so those choices can change output bits. A fixed random seed does not fix a changing reduction order. [Thinking Machines Lab](https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/) explains how changing serving batches makes this visible even when each kernel repeats deterministically for a fixed shape.
 
 For RL, the discrepancy reaches the quantities used to update the policy. There is also a performance constraint: rollout throughput matters, and slower consistent kernels can make each training iteration more expensive. The practical target is to preserve numerical behavior while minimizing that performance loss.
 
-FlashInfer's approach starts with a numerical contract: **fix the numerical dataflow, then optimize how the GPU executes it.** Lean proofs establish identities about that dataflow, and bitwise GPU tests check that implementations preserve it as tiling, work assignment, and scheduling change. FlashInfer [v0.7.4](https://github.com/flashinfer-ai/flashinfer/releases/tag/v0.7.4) introduced this mode for BF16, FP8, MXFP8, NVFP4, and MXFP4 GEMMs on Blackwell and Rubin. This post explains how tuning and controlled split-K fit within the contract, then measures the cost of invariance across decode, middle, and prefill on **NVIDIA Vera Rubin NVL4**, comparing regular and batch-invariant kernels in both untuned and autotuned studies.
+At FlashInfer, we have developed a new workflow for authoring GPU kernels that satisfy RL's numerical requirements: determinism, bitwise batch invariance, and consistency across prefill and decode. Our approach starts with a numerical contract: **fix the numerical dataflow, then optimize how the GPU executes it.** We pair [Lean](https://lean-lang.org/) proofs of dataflow identities with bitwise GPU tests that check agreement as tiling, work assignment, and scheduling change. We introduced this mode in FlashInfer [v0.7.4](https://github.com/flashinfer-ai/flashinfer/releases/tag/v0.7.4) for BF16, FP8, MXFP8, NVFP4, and MXFP4 GEMMs on Blackwell and Rubin. In this post, we explain how tuning and controlled split-K fit within the contract, then measure the cost of invariance across decode, middle, and prefill on **NVIDIA Vera Rubin NVL4**, comparing regular and batch-invariant kernels in both untuned and autotuned studies.
 
 ## What is batch invariance, and why does it matter for RL?
 
@@ -160,7 +162,7 @@ These boundaries are implemented by an **analytical heuristic over the fixed wei
 2. **Limit partial-result traffic.** Require `C <= floor(K / (16*N))`. For BF16, this bounds the FP32 partial-buffer round trip to one quarter of the BF16 activation bytes. Long K relative to N leaves more room for useful splitting.
 3. **Keep each chunk useful and aligned.** Each chunk must contain whole format granules and at least 256 K elements. Choose the largest power-of-two C up to 128 satisfying all constraints, or C=1 when none qualifies.
 
-Together, these rules place the chunked classes mainly in narrow-N, long-K regions. Power-of-two counts create stepped boundaries, and divisibility constraints create stripes and cutouts. The rule uses the appropriate granule for each format and never takes M as an input. Ordinary unsharded transformer shapes often remain unsplit.
+Together, these rules place the chunked classes mainly in narrow-N, long-K regions. Power-of-two counts create stepped boundaries, and divisibility constraints create stripes and cutouts. The rule uses the appropriate granule for each format and depends on neither M nor the available SM count; the 256-tile cutoff is a fixed policy constant. SM count can guide execution-configuration selection within the chosen numerical class. Ordinary unsharded transformer shapes often remain unsplit.
 
 On SM107, NVFP4 has another N/K-dependent choice: ordinary unsplit regions use a 128-element MMA step, while split regions use its 64-element step. Both decisions depend on the fixed weight shape. Neither depends on M.
 
@@ -257,7 +259,7 @@ FI batch invariant is close to the regular FI CuTe DSL backend across the repres
 
 ### Hypothetical study: giving up split-K
 
-**Suppose we had disabled split-K to simplify batch invariance.** We evaluate this hypothetical design choice using actual measurements of an unsplit alternative to FlashInfer's chunked numerical classes. The study covers eight shapes inside the split region, with policy-selected C ranging from 2 to 32, at M=1, 16, 128, 1024, and 8192. These narrow-output shapes form a separate ablation from the primary transformer matrix.
+**Suppose we had disabled split-K to simplify batch invariance.** We evaluate this hypothetical design choice using actual measurements of an unsplit alternative to FlashInfer's chunked numerical classes. The displayed study covers seven shapes inside the split region, with policy-selected C ranging from 2 to 16, at M=1, 16, 128, 1024, and 8192. These narrow-output shapes form a separate ablation from the primary transformer matrix; the bars and heatmap use the same seven-shape selection.
 
 The ablation forces C=1 through FlashInfer's internal class entry point and uses its unchanged dispatcher and autotuner for that class. Both sides receive identical operands and use the same MMA primitive and epilogue. For NVFP4, both sides retain the split region's 64-element primitive; the ablation does not also switch to the ordinary unsplit region's wider instruction. Tuning profiles the same top-configuration policy separately for each class.
 
@@ -267,29 +269,31 @@ We express the ablation as **performance retained after giving up split-K**:
 
 `retained performance = unsplit throughput / policy-class throughput = policy-class latency / unsplit latency`
 
-A value of 0.5× means half the performance, or a 50% loss; 1× means no change. With autotuning, giving up split-K retains **0.47×** BF16 decode performance (a **53% loss**) and **0.69×** NVFP4 decode performance (a **31% loss**) in geometric mean over the selected split-region shapes.
+A value of 0.5× means half the performance, or a 50% loss; 1× means no change. With autotuning, giving up split-K retains **0.54×** BF16 decode performance (a **46% loss**) and **0.78×** NVFP4 decode performance (a **22% loss**) in geometric mean over the seven selected split-region shapes.
 
 ![Measured retained performance under a hypothetical policy that disables split-K, with untuned and autotuned rows and decode, middle, and prefill columns. Ratios below 1 show the performance lost relative to policy-selected chunking.](/assets/imgs/rl-ready-kernels/splitk-retained-performance.svg)
 
 *A measured ablation of a hypothetical no-split policy. Both classes are independently batch invariant. Values below the dashed 1× line show the cost of removing chunking; values above 1× show an improvement. The same MMA primitive and epilogue are retained on both sides.*
 
-Some prefill cases improve without chunking, and these remain above 1×. For tuned BF16 at N=128, K=65536, removing split-K retains about 0.17× performance at M=1 (an 83% loss), but reaches 1.35× at M=8192 (a 35% improvement). A fixed chunk contract exposes decode parallelism and also fixes the arithmetic that larger batches must retain. Autotuning improves the aggregate tradeoff without making every chunked case faster.
+Some prefill cases improve without chunking, and these remain above 1×. A fixed chunk contract exposes decode parallelism and also fixes the arithmetic that larger batches must retain. Autotuning improves the aggregate tradeoff without making every chunked case faster.
 
-![Every split-region shape/M ratio expressed as performance retained without split-K, with values below 1 indicating losses and values above 1 indicating improvements.](/assets/imgs/rl-ready-kernels/splitk-ablation.svg)
+![Seven selected split-region shapes expressed as performance retained without split-K, with values below 1 indicating losses and values above 1 indicating improvements.](/assets/imgs/rl-ready-kernels/splitk-ablation.svg)
 
-*The hypothetical no-split policy uses the same retained-performance definition as the bars. Every measured shape/M pair is shown, with untuned and autotuned rows. Exact ratios, absolute latencies, and raw samples are retained in the reproduction artifacts.*
+*The hypothetical no-split policy uses the same seven shapes and retained-performance definition as the bars, with untuned and autotuned rows. The complete eight-shape sweep remains in the [reproduction artifacts](#appendix-reproduction), with display-selection flags in the retained-performance CSV.*
 
 ## From consistent GEMMs to consistent RL
 
 GEMMs account for a large part of a model's forward pass, but phase consistency spans the rest of that pass too. Attention must preserve a token's computation across prefill, decode, and KV partitioning. Normalization and log-probability reductions need stable numerical contracts. Quantization scales, fused activations, and tensor-parallel collectives must agree between the trainer and rollout engine. Sampling also needs request-level random-state semantics when reproducible responses are required.
 
-FlashInfer's current-main work extends the numerical-contract approach beyond the GEMMs introduced in v0.7.4. Its batch-invariant attention classes define fixed absolute KV tiles and chunks shared by supported prefill and decode wrappers. Quantization and sampling/log-probability APIs have their own specified chains and conformance checks. These features have individual input and execution constraints, documented alongside their APIs.
+These GEMMs are the first part of our broader work on numerical consistency for RL. We are continuing to develop and verify other operators, including attention, normalization, quantization, and sampling/log-probability APIs. We will discuss their numerical contracts, kernel design, and performance in subsequent parts of this blog series.
 
 For an RL framework, the integration task is to use the same contract for each matching forward computation. A kernel-level guarantee does not establish deterministic training updates or prove that two complete model implementations agree. It provides a stable building block for doing that work.
 
 The engineering direction is to make numerical behavior an explicit part of the API. Once the dataflow is fixed and checked, performance work can explore how to execute it efficiently—from one-token decode to large prefill—while preserving the computation that the RL pipeline relies on.
 
-## Reproduce the measurements
+<a id="appendix-reproduction"></a>
+
+## Appendix: reproducing the measurements
 
 The [reproduction bundle](/assets/data/rl-ready-kernels/flashinfer-rl-study.tar.gz) contains the exact measured harness snapshots, backend adapters, source and environment manifests, selected tuning configurations, generated-code provenance, correctness checks, raw per-iteration timing samples, absolute-latency CSVs, and figure scripts. It also includes the N/K class-policy map and both modes of the split-K ablation. The [archive checksum](/assets/data/rl-ready-kernels/SHA256SUMS) and the bundle's internal file checksums allow the artifacts to be verified before rerunning them.
 

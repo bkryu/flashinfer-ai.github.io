@@ -15,3 +15,5 @@ analysis/summary.json and analysis/latency.csv are unchanged frozen analysis inp
 
 
 The current figures show selected comparisons while retaining all original measurements in the frozen inputs. The split-K figures evaluate a hypothetical no-split policy with actual kernel timings. The numerical-class diagram uses continuous elbow connectors.
+
+The displayed split-K study now uses seven shapes, excluding N=128,K=65536 from both the heatmap and aggregate bars. The full eight-shape sweep remains in the CSV; included_in_displayed_study marks the 140 displayed and 20 retained-but-omitted cells. The same subset is used for all formats and tuning modes.

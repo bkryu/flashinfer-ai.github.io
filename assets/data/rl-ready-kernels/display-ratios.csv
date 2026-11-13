@@ -47,15 +47,15 @@ competitor,nvfp4,autotuned,nvfp4-autotuned,vllm_cutlass_bi_w4a4,Yes,middle,2.303
 competitor,nvfp4,autotuned,nvfp4-autotuned,flashinfer_cute_dsl,No,middle,0.9569634340708065,40,comparator latency / FI batch invariant latency
 competitor,nvfp4,autotuned,nvfp4-autotuned,vllm_cutlass_bi_w4a4,Yes,prefill,1.8353645319802965,32,comparator latency / FI batch invariant latency
 competitor,nvfp4,autotuned,nvfp4-autotuned,flashinfer_cute_dsl,No,prefill,1.012836050058034,32,comparator latency / FI batch invariant latency
-splitk_retention,bf16,untuned,bf16-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,decode,0.46587903241312306,16,policy-class latency / forced-unsplit latency
-splitk_retention,nvfp4,untuned,nvfp4-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,decode,0.7939932412442929,16,policy-class latency / forced-unsplit latency
-splitk_retention,bf16,untuned,bf16-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,middle,0.5157315030812958,8,policy-class latency / forced-unsplit latency
-splitk_retention,nvfp4,untuned,nvfp4-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,middle,0.6829875324331902,8,policy-class latency / forced-unsplit latency
-splitk_retention,bf16,untuned,bf16-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,prefill,0.9054701676170961,16,policy-class latency / forced-unsplit latency
-splitk_retention,nvfp4,untuned,nvfp4-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,prefill,1.393527322033791,16,policy-class latency / forced-unsplit latency
-splitk_retention,bf16,autotuned,bf16-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,decode,0.4653847468662793,16,policy-class latency / forced-unsplit latency
-splitk_retention,nvfp4,autotuned,nvfp4-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,decode,0.6918865413040415,16,policy-class latency / forced-unsplit latency
-splitk_retention,bf16,autotuned,bf16-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,middle,0.42815574171834087,8,policy-class latency / forced-unsplit latency
-splitk_retention,nvfp4,autotuned,nvfp4-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,middle,0.6278588459029601,8,policy-class latency / forced-unsplit latency
-splitk_retention,bf16,autotuned,bf16-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,prefill,0.8983016107513359,16,policy-class latency / forced-unsplit latency
-splitk_retention,nvfp4,autotuned,nvfp4-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,prefill,0.9260833025480478,16,policy-class latency / forced-unsplit latency
+splitk_retention,bf16,untuned,bf16-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,decode,0.5374596361263081,14,policy-class latency / forced-unsplit latency
+splitk_retention,nvfp4,untuned,nvfp4-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,decode,0.9117705188286302,14,policy-class latency / forced-unsplit latency
+splitk_retention,bf16,untuned,bf16-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,middle,0.5851171588620533,7,policy-class latency / forced-unsplit latency
+splitk_retention,nvfp4,untuned,nvfp4-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,middle,0.7663099604987029,7,policy-class latency / forced-unsplit latency
+splitk_retention,bf16,untuned,bf16-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,prefill,0.9143003435267325,14,policy-class latency / forced-unsplit latency
+splitk_retention,nvfp4,untuned,nvfp4-splitk-ablation-untuned,flashinfer_unsplit_ablation,Yes,prefill,1.4726428794397957,14,policy-class latency / forced-unsplit latency
+splitk_retention,bf16,autotuned,bf16-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,decode,0.5361555425348802,14,policy-class latency / forced-unsplit latency
+splitk_retention,nvfp4,autotuned,nvfp4-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,decode,0.7811254085352705,14,policy-class latency / forced-unsplit latency
+splitk_retention,bf16,autotuned,bf16-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,middle,0.46905072358742145,7,policy-class latency / forced-unsplit latency
+splitk_retention,nvfp4,autotuned,nvfp4-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,middle,0.7013978697675162,7,policy-class latency / forced-unsplit latency
+splitk_retention,bf16,autotuned,bf16-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,prefill,0.9129485253278458,14,policy-class latency / forced-unsplit latency
+splitk_retention,nvfp4,autotuned,nvfp4-splitk-ablation-autotuned,flashinfer_unsplit_ablation,Yes,prefill,0.9218754106071191,14,policy-class latency / forced-unsplit latency
